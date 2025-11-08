@@ -3,6 +3,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 
 // 설정
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
@@ -77,6 +78,39 @@ const watcher = chokidar.watch(`${WATCH_FOLDER}/**/*.mp4`, {
     pollInterval: 100
   }
 });
+
+// 1분마다 현재 시간 출력
+// 초기 실행
+
+function archiveClips() {
+     const now = new Date();
+console.log(`⏰ Current time: ${now.toLocaleString()}`);
+exec('/root/bin/archive-clips.sh', (error, stdout, stderr) => {
+    if (error) {
+        console.error(`Error executing archive-clips.sh: ${error.message}`);
+        return;
+    }
+    if (stderr) {
+        console.error(`stderr: ${stderr}`);
+    }
+    if (stdout) {
+        console.log(`stdout: ${stdout}`);
+    }
+});
+}
+
+archiveClips();
+
+// 60초마다 반복 실행
+setInterval(() => {
+    archiveClips();
+}, 60000);
+
+// 10초 대기
+console.log('⏳ Waiting 10 seconds before starting to watch for new clips...');
+await new Promise(resolve => setTimeout(resolve, 10000));
+
+console.log('done waiting. Starting watcher now.');
 
 watcher
   .on('add', filePath => {
