@@ -1,9 +1,9 @@
-const chokidar = require('chokidar');
-const axios = require('axios');
-const FormData = require('form-data');
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
+import chokidar from 'chokidar';
+import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs';
+import path from 'path';
+import { exec } from 'child_process';
 
 // 설정
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
