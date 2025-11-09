@@ -85,7 +85,7 @@ const watcher = chokidar.watch(`${WATCH_FOLDER}/**/*.mp4`, {
 function archiveClips() {
      const now = new Date();
 console.log(`⏰ Current time: ${now.toLocaleString()}`);
-exec('/root/bin/archive-clips.sh', (error, stdout, stderr) => {
+exec('touch /tmp/archive_is_unreachable', (error, stdout, stderr) => {
     if (error) {
         console.error(`Error executing archive-clips.sh: ${error.message}`);
         return;
