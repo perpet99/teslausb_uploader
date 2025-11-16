@@ -94,11 +94,13 @@ function getAllMp4Files(folderPath) {
 
   function scanDir(dir) {
     console.log(`Scanning directory: ${dir}`);
-    
+
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       
       for (const entry of entries) {
+        console.log(`Processing entry: ${entry.name}`);
+        
         const fullPath = path.join(dir, entry.name);
         
         if (entry.isDirectory()) {
