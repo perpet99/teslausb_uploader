@@ -15,7 +15,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
-let lastSentDate = new Date(); // 초기값 설정
+let lastSentDate = null
 let oldWifiConnected = false;
 
 // 마지막 전송 날짜 로드
@@ -208,7 +208,7 @@ async function processFiles() {
     await new Promise(resolve => setTimeout(resolve, 5000));
     // 마지막 전송 날짜 로드
     // const lastSentDate = getLastSentDate();
-    console.log(`📅 Last sent date: ${lastSentDate.toISOString()}`);
+    // console.log(`📅 Last sent date: ${lastSentDate.toISOString()}`);
     
     // 모든 폴더에서 파일 수집
     let allFiles = [];
@@ -219,7 +219,7 @@ async function processFiles() {
     }
     
     // 마지막 전송 날짜 이후의 파일만 필터링
-    const newFiles = allFiles.filter(file => file.mtime > lastSentDate);
+    const newFiles = allFiles.filter(file => lastSentDate ? file.mtime > lastSentDate : true);
     console.log(`🆕 ${newFiles.length} new files since last upload`);
     
     if (newFiles.length === 0) {
@@ -237,8 +237,23 @@ async function processFiles() {
     // 파일 전송
     let uploadedCount = 0;
     // let latestMtime = lastSentDate;
-    
+    if( lastSentDate == null ) {
+      lastSentDate = new Date(0);
+        
+      for (const file of filesToSend) {
+        if (file.mtime > lastSentDate) {
+          lastSentDate = file.mtime;
+        }
+      }
+
+      console.log(`📅 Initial last sent date set to epoch start.`,lastSentDate);
+      return;
+    }
+
     for (const file of filesToSend) {
+
+
+
       const success = await sendToDiscord(file);
       if (success) {
         uploadedCount++;
