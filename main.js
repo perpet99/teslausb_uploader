@@ -12,6 +12,7 @@ const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SentryClips'
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
+const TRIM_SIZE = 20 * 1024 * 1024; // 20MB - 이 크기 이상이면 뒷부분만 전송
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
@@ -155,17 +156,25 @@ async function sendToDiscord(file) {
   try {
     console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-    // if (file.size > MAX_FILE_SIZE) {
-    //   console.warn(`File ${file.name} exceeds Discord's 25MB limit. Sending notification only.`);
-    //   await axios.post(DISCORD_WEBHOOK_URL, {
-    //     content: `⚠️ Clip too large to upload: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB) from ${file.folder}`
-    //   });
-    //   return false;
-    // }
-
     const form = new FormData();
-    form.append('file', fs.createReadStream(file.realPath), file.name);
-    form.append('content', `🚗 **${file.folder}**: ${file.name}`);
+    
+    // 파일이 20MB보다 크면 뒷부분만 전송
+    if (file.size > TRIM_SIZE) {
+      console.log(`⚠️ File exceeds ${TRIM_SIZE / 1024 / 1024}MB, sending last 20MB only`);
+      
+      const start = file.size - TRIM_SIZE;
+      const end = file.size;
+      
+      // 파일 스트림 생성 (뒷부분만)
+      const stream = fs.createReadStream(file.realPath, { start, end });
+      
+      form.append('file', stream, `${path.basename(file.name, '.mp4')}_last20MB.mp4`);
+      form.append('content', `🚗 **${file.folder}**: ${file.name} (Last 20MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    } else {
+      // 20MB 이하면 전체 파일 전송
+      form.append('file', fs.createReadStream(file.realPath), file.name);
+      form.append('content', `🚗 **${file.folder}**: ${file.name}`);
+    }
 
     await axios.post(DISCORD_WEBHOOK_URL, form, {
       headers: form.getHeaders(),
