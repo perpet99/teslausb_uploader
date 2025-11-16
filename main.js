@@ -155,13 +155,13 @@ async function sendToDiscord(file) {
   try {
     console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-    if (file.size > MAX_FILE_SIZE) {
-      console.warn(`File ${file.name} exceeds Discord's 25MB limit. Sending notification only.`);
-      await axios.post(DISCORD_WEBHOOK_URL, {
-        content: `⚠️ Clip too large to upload: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB) from ${file.folder}`
-      });
-      return false;
-    }
+    // if (file.size > MAX_FILE_SIZE) {
+    //   console.warn(`File ${file.name} exceeds Discord's 25MB limit. Sending notification only.`);
+    //   await axios.post(DISCORD_WEBHOOK_URL, {
+    //     content: `⚠️ Clip too large to upload: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB) from ${file.folder}`
+    //   });
+    //   return false;
+    // }
 
     const form = new FormData();
     form.append('file', fs.createReadStream(file.realPath), file.name);
