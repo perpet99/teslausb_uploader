@@ -12,7 +12,7 @@ const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SentryClips'
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB - 분할 크기
+const CHUNK_SIZE = 5 * 1024 * 1024; // 10MB - 분할 크기
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
@@ -225,6 +225,8 @@ async function sendToDiscord(file) {
       // 각 청크 전송
       for (const chunk of chunks) {
         const form = new FormData();
+        console.log(`   Uploading part ${chunk.partNumber}/${chunk.totalParts}: ${chunk.path},  ${chunk.name} (${(chunk.size / 1024 / 1024).toFixed(2)} MB)`);
+
         form.append('file', fs.createReadStream(chunk.path), chunk.name);
         form.append('content', `🚗 **${file.folder}**: ${file.name} (Part ${chunk.partNumber}/${chunk.totalParts})`);
 
