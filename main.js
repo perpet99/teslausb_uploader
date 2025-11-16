@@ -13,6 +13,7 @@ const WATCH_FOLDERS = [
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
 const TRIM_SIZE = 10 * 1024 * 1024; // 10MB - 이 크기 이상이면 뒷부분만 전송
+const TRIM_SIZE_MB = Math.round(TRIM_SIZE / (1024 * 1024));
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
@@ -158,20 +159,20 @@ async function sendToDiscord(file) {
 
     const form = new FormData();
     
-    // 파일이 20MB보다 크면 뒷부분만 전송
+    // 파일이 TRIM_SIZE_MB 보다 크면 뒷부분만 전송
     if (file.size > TRIM_SIZE) {
-      console.log(`⚠️ File exceeds ${TRIM_SIZE / 1024 / 1024}MB, sending last 20MB only`);
+      console.log(`⚠️ File exceeds ${TRIM_SIZE_MB}MB, sending last ${TRIM_SIZE_MB}MB only`);
       
       const start = file.size - TRIM_SIZE;
-      const end = file.size;
+      const end = file.size-1;
       
       // 파일 스트림 생성 (뒷부분만)
       const stream = fs.createReadStream(file.realPath, { start, end });
       
-      form.append('file', stream, `${path.basename(file.name, '.mp4')}_last20MB.mp4`);
-      form.append('content', `🚗 **${file.folder}**: ${file.name} (Last 20MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      form.append('file', stream, `${path.basename(file.name, '.mp4')}_last${TRIM_SIZE_MB}MB.mp4`);
+      form.append('content', `🚗 **${file.folder}**: ${file.name} (Last ${TRIM_SIZE_MB}MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
     } else {
-      // 20MB 이하면 전체 파일 전송
+      // TRIM_SIZE_MB 이하면 전체 파일 전송
       form.append('file', fs.createReadStream(file.realPath), file.name);
       form.append('content', `🚗 **${file.folder}**: ${file.name}`);
     }
