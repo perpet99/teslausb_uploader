@@ -88,10 +88,13 @@ function getAllMp4Files(folderPath) {
   const files = [];
   
   if (!fs.existsSync(folderPath)) {
+    console.log(`⚠️ Folder does not exist: ${folderPath}`);
     return files;
   }
 
   function scanDir(dir) {
+    console.log(`Scanning directory: ${dir}`);
+    
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       
