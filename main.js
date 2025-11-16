@@ -4,8 +4,6 @@ import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 
-const { promises: fsPromises } = fs;
-
 // 설정
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'YOUR_DISCORD_WEBHOOK_URL';
 const TARGET_WIFI_SSID = process.env.WIFI_SSID || 'ehbs';
@@ -14,12 +12,11 @@ const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SentryClips'
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk size
-const CHUNK_SIZE_MB = Math.round(CHUNK_SIZE / (1024 * 1024));
-const CHUNK_TEMP_DIR = '/tmp/teslausb_chunks';
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB - 분할 크기
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
+const TEMP_SPLIT_DIR = '/tmp/video_split_chunks'; // 임시 분할 파일 저장 폴더
 let lastSentDate = null
 let oldWifiConnected = false;
 
@@ -155,51 +152,62 @@ async function sendMessageToDiscord(message) {
     }
 }
 
-// 대용량 파일을 임시 디렉터리에 10MB씩 분할
-async function splitFileIntoChunks(filePath, baseName) {
-  const timestamp = Date.now();
-  const chunkDir = path.join(CHUNK_TEMP_DIR, `${baseName}_${timestamp}`);
-  await fsPromises.mkdir(chunkDir, { recursive: true });
-
+// 파일을 10MB 청크로 분할
+async function splitFileIntoChunks(file) {
   const chunks = [];
-  const handle = await fsPromises.open(filePath, 'r');
-  const { size: totalSize } = await handle.stat();
-  const buffer = Buffer.alloc(CHUNK_SIZE);
-  let offset = 0;
-  let index = 1;
-
-  try {
-    while (offset < totalSize) {
-      const { bytesRead } = await handle.read(buffer, 0, CHUNK_SIZE, offset);
-      if (bytesRead === 0) {
-        break;
-      }
-
-      const chunkName = `${baseName}_part${String(index).padStart(3, '0')}.mp4`;
-      const chunkPath = path.join(chunkDir, chunkName);
-      await fsPromises.writeFile(chunkPath, Buffer.from(buffer.slice(0, bytesRead)));
-      chunks.push({ path: chunkPath, name: chunkName, size: bytesRead });
-
-      offset += bytesRead;
-      index += 1;
-    }
-  } finally {
-    await handle.close();
+  const baseName = path.basename(file.name, '.mp4');
+  
+  // 임시 디렉토리 생성
+  if (!fs.existsSync(TEMP_SPLIT_DIR)) {
+    fs.mkdirSync(TEMP_SPLIT_DIR, { recursive: true });
   }
-
-  if (chunks.length === 0) {
-    throw new Error('No chunks were created from file.');
+  
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  console.log(`📦 Splitting file into ${totalChunks} chunks of ${CHUNK_SIZE / 1024 / 1024}MB each`);
+  
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunkSize = end - start;
+    
+    const chunkFileName = `${baseName}_part${String(i + 1).padStart(3, '0')}.mp4`;
+    const chunkPath = path.join(TEMP_SPLIT_DIR, chunkFileName);
+    
+    // 청크 데이터 읽기
+    const buffer = Buffer.alloc(chunkSize);
+    const fd = fs.openSync(file.realPath, 'r');
+    fs.readSync(fd, buffer, 0, chunkSize, start);
+    fs.closeSync(fd);
+    
+    // 임시 파일로 저장
+    fs.writeFileSync(chunkPath, buffer);
+    
+    chunks.push({
+      path: chunkPath,
+      name: chunkFileName,
+      size: chunkSize,
+      partNumber: i + 1,
+      totalParts: totalChunks
+    });
+    
+    console.log(`   Created chunk ${i + 1}/${totalChunks}: ${chunkFileName} (${(chunkSize / 1024 / 1024).toFixed(2)} MB)`);
   }
-
-  return { dir: chunkDir, chunks };
+  
+  return chunks;
 }
 
-// 임시 분할 파일 정리
-async function cleanupChunkDirectory(dirPath) {
+// 임시 청크 파일들 정리
+function cleanupChunks() {
   try {
-    await fsPromises.rm(dirPath, { recursive: true, force: true });
-  } catch (cleanupError) {
-    console.warn(`Cleanup warning for ${dirPath}: ${cleanupError.message}`);
+    if (fs.existsSync(TEMP_SPLIT_DIR)) {
+      const files = fs.readdirSync(TEMP_SPLIT_DIR);
+      for (const file of files) {
+        fs.unlinkSync(path.join(TEMP_SPLIT_DIR, file));
+      }
+      console.log('🧹 Cleaned up chunk files');
+    }
+  } catch (error) {
+    console.error('Error cleaning up chunks:', error.message);
   }
 }
 
@@ -208,66 +216,60 @@ async function sendToDiscord(file) {
   try {
     console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-    // 파일이 10MB보다 크면 임시 폴더에 10MB씩 분할하여 전송
+    // 10MB보다 크면 분할해서 전송
     if (file.size > CHUNK_SIZE) {
-      const baseName = path.basename(file.name, path.extname(file.name));
-      let chunkDir = null;
+      console.log(`⚠️ File exceeds ${CHUNK_SIZE / 1024 / 1024}MB, splitting into chunks...`);
+      
+      const chunks = await splitFileIntoChunks(file);
+      
+      // 각 청크 전송
+      for (const chunk of chunks) {
+        const form = new FormData();
+        form.append('file', fs.createReadStream(chunk.path), chunk.name);
+        form.append('content', `🚗 **${file.folder}**: ${file.name} (Part ${chunk.partNumber}/${chunk.totalParts})`);
 
-      try {
-        const { dir, chunks } = await splitFileIntoChunks(file.realPath, baseName);
-        chunkDir = dir;
+        await axios.post(DISCORD_WEBHOOK_URL, form, {
+          headers: form.getHeaders(),
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+          timeout: 30*1000
+        });
 
-        console.log(`📦 Split into ${chunks.length} chunk(s)`);
-
-        for (let i = 0; i < chunks.length; i += 1) {
-          const chunk = chunks[i];
-          const form = new FormData();
-          form.append('file', fs.createReadStream(chunk.path), chunk.name);
-          form.append(
-            'content',
-            `🚗 **${file.folder}**: ${file.name} (Part ${i + 1}/${chunks.length}, ${(chunk.size / 1024 / 1024).toFixed(2)} MB of ${(file.size / 1024 / 1024).toFixed(2)} MB)`
-          );
-
-          await axios.post(DISCORD_WEBHOOK_URL, form, {
-            headers: form.getHeaders(),
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            timeout: 30 * 1000
-          });
-
-          console.log(`   ✅ Uploaded chunk ${i + 1}/${chunks.length}`);
-
-          if (i < chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-        }
-
-        console.log(`✅ Successfully uploaded all chunks for: ${file.name}`);
-        return true;
-      } finally {
-        if (chunkDir) {
-          await cleanupChunkDirectory(chunkDir);
+        console.log(`   ✅ Uploaded part ${chunk.partNumber}/${chunk.totalParts}`);
+        
+        // Discord rate limit 방지
+        if (chunk.partNumber < chunk.totalParts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
+      
+      // 청크 파일 정리
+      cleanupChunks();
+      
+      console.log(`✅ Successfully uploaded all ${chunks.length} parts of: ${file.name}`);
+      return true;
+    } else {
+      // 10MB 이하면 전체 파일 전송
+      const form = new FormData();
+      form.append('file', fs.createReadStream(file.realPath), file.name);
+      form.append('content', `🚗 **${file.folder}**: ${file.name}`);
+
+      await axios.post(DISCORD_WEBHOOK_URL, form, {
+        headers: form.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 30*1000
+      });
+
+      console.log(`✅ Successfully uploaded: ${file.name}`);
+      return true;
     }
-
-    // 10MB 이하면 전체 파일 전송
-    const form = new FormData();
-    form.append('file', fs.createReadStream(file.realPath), file.name);
-    form.append('content', `🚗 **${file.folder}**: ${file.name}`);
-
-    await axios.post(DISCORD_WEBHOOK_URL, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      timeout: 30 * 1000
-    });
-
-    console.log(`✅ Successfully uploaded: ${file.name}`);
-    return true;
   } catch (error) {
     console.error(`❌ Error uploading ${file.name}:`, error.message);
-
+    
+    // 에러 발생 시 청크 파일 정리
+    cleanupChunks();
+    
     try {
       await axios.post(DISCORD_WEBHOOK_URL, {
         content: `❌ Failed to upload: **${file.name}**\nError: ${error.message}`
