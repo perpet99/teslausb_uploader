@@ -1,46 +1,164 @@
-import chokidar from 'chokidar';
+import { execSync, exec } from 'child_process';
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
 
 // 설정
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL
-const WATCH_FOLDER = process.env.WATCH_FOLDER || '/mutable/TeslaCam/SavedClips';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'YOUR_DISCORD_WEBHOOK_URL';
+const TARGET_WIFI_SSID = process.env.WIFI_SSID || 'ehbs';
+const WATCH_FOLDERS = [
+  '/mutable/TeslaCam/SavedClips',
+  '/mutable/TeslaCam/SentryClips'
+];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
+const MAX_FILES_PER_RUN = 4;
+const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
+const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
+let lastSentDate = new Date(); // 초기값 설정
+let oldWifiConnected = false;
+
+// 마지막 전송 날짜 로드
+function getLastSentDate() {
+  try {
+    if (fs.existsSync(LAST_SENT_FILE)) {
+      const content = fs.readFileSync(LAST_SENT_FILE, 'utf8').trim();
+      return content ? new Date(content) : new Date(0);
+    }
+  } catch (error) {
+    console.error('Failed to read last sent date:', error.message);
+  }
+  return new Date(0); // 파일이 없으면 epoch 시작
+}
+
+// 마지막 전송 날짜 저장
+function saveLastSentDate(date) {
+  try {
+    fs.writeFileSync(LAST_SENT_FILE, date.toISOString(), 'utf8');
+  } catch (error) {
+    console.error('Failed to save last sent date:', error.message);
+  }
+}
+
+// 현재 연결된 Wi-Fi SSID 확인
+function getCurrentWifiSSID() {
+  try {
+    // iwgetid 명령어로 현재 연결된 SSID 확인
+    const output = execSync('iwgetid -r', { encoding: 'utf8' }).trim();
+    return output;
+  } catch (error) {
+    // 연결되지 않았거나 오류 발생
+    return null;
+  }
+}
+
+// 특정 Wi-Fi에 연결되어 있는지 확인
+function isConnectedToTargetWifi() {
+  const currentSSID = getCurrentWifiSSID();
+  const connected = currentSSID === TARGET_WIFI_SSID;
+  if (connected) {
+    console.log(`✅ Connected to target Wi-Fi: ${currentSSID}`);
+  } else {
+    console.log(`❌ Not connected to target Wi-Fi. Current: ${currentSSID || 'None'}`);
+  }
+  return connected;
+}
+
+// 스냅샷 생성
+function makeSnapshot() {
+  return new Promise((resolve, reject) => {
+    console.log('📸 Creating snapshot...');
+    exec('/root/bin/make_snapshot.sh', (error, stdout, stderr) => {
+      if (error) {
+        console.error('Snapshot error:', error.message);
+        reject(error);
+        return;
+      }
+      if (stderr) {
+        console.log('Snapshot stderr:', stderr);
+      }
+      console.log('✅ Snapshot created');
+      resolve(stdout);
+    });
+  });
+}
+
+// 폴더에서 모든 mp4 파일 재귀적으로 수집
+function getAllMp4Files(folderPath) {
+  const files = [];
+  
+  if (!fs.existsSync(folderPath)) {
+    return files;
+  }
+
+  function scanDir(dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          scanDir(fullPath);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+          try {
+            // 심볼릭 링크인 경우 실제 경로 확인
+            const realPath = fs.realpathSync(fullPath);
+            const stats = fs.statSync(realPath);
+            
+            files.push({
+              path: fullPath,
+              realPath: realPath,
+              name: entry.name,
+              size: stats.size,
+              mtime: stats.mtime,
+              folder: path.basename(path.dirname(dir)) // SavedClips or SentryClips
+            });
+          } catch (err) {
+            console.warn(`Skipping ${fullPath}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`Cannot read directory ${dir}: ${err.message}`);
+    }
+  }
+
+  scanDir(folderPath);
+  return files;
+}
+
+
+// 디스코드로 메시지 전송
+async function sendMessageToDiscord(message) {
+    try {
+        await axios.post(DISCORD_WEBHOOK_URL, {
+            content: message
+        });
+        console.log(`✅ Message sent to Discord: ${message}`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error sending message to Discord:`, error.message);
+        return false;
+    }
+}
 
 // 디스코드로 파일 전송
-async function sendToDiscord(text = '',filePath = null) {
-    let fileName = 'none'
-
+async function sendToDiscord(file) {
   try {
+    console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+    if (file.size > MAX_FILE_SIZE) {
+      console.warn(`File ${file.name} exceeds Discord's 25MB limit. Sending notification only.`);
+      await axios.post(DISCORD_WEBHOOK_URL, {
+        content: `⚠️ Clip too large to upload: **${file.name}** (${(file.size / 1024 / 1024).toFixed(2)} MB) from ${file.folder}`
+      });
+      return false;
+    }
 
     const form = new FormData();
-    
-    if( filePath != null ) {
-        // 심볼릭 링크인 경우 실제 파일 경로 확인
-        const realPath = fs.realpathSync(filePath);
-        const stats = fs.statSync(realPath);
-        fileName = path.basename(filePath);
-        
-        console.log(`Processing: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
-
-        // if (stats.size > MAX_FILE_SIZE) {
-        // console.warn(`File ${fileName} exceeds Discord's 25MB limit. Sending notification only.`);
-        // await axios.post(DISCORD_WEBHOOK_URL, {
-        //     content: `⚠️ New clip recorded but too large to upload: **${fileName}** (${(stats.size / 1024 / 1024).toFixed(2)} MB)`
-        // });
-        // return;
-        // }
-        form.append('file', fs.createReadStream(realPath), fileName);  
-    }
-    
-    if( text == '') {
-      form.append('content', `🚗 New Tesla clip: **${fileName}**`);
-    } else {
-      form.append('content', text);
-    }
+    form.append('file', fs.createReadStream(file.realPath), file.name);
+    form.append('content', `🚗 **${file.folder}**: ${file.name}`);
 
     await axios.post(DISCORD_WEBHOOK_URL, form, {
       headers: form.getHeaders(),
@@ -48,115 +166,127 @@ async function sendToDiscord(text = '',filePath = null) {
       maxBodyLength: Infinity
     });
 
-    console.log(`✅ Successfully uploaded: ${fileName}`);
+    console.log(`✅ Successfully uploaded: ${file.name}`);
+    return true;
   } catch (error) {
-    console.error(`❌ Error uploading ${fileName}:`, error.message);
+    console.error(`❌ Error uploading ${file.name}:`, error.message);
     
-    // 에러 발생 시 알림만 전송
     try {
       await axios.post(DISCORD_WEBHOOK_URL, {
-        content: `❌ Failed to upload: **${fileName}**\nError: ${error.message}`
+        content: `❌ Failed to upload: **${file.name}**\nError: ${error.message}`
       });
     } catch (notifyError) {
       console.error('Failed to send error notification:', notifyError.message);
     }
+    return false;
   }
 }
 
-// 파일 감시 시작
-console.log(`🔍 Watching folder: ${WATCH_FOLDER}`);
-console.log(`📡 Discord webhook configured: ${DISCORD_WEBHOOK_URL ? 'Yes' : 'No'}`);
-
-
-
-const watcher = chokidar.watch(`${WATCH_FOLDER}/**/*.mp4`, {
-  persistent: true,
-  ignoreInitial: true, // 시작 시 기존 파일 무시
-  followSymlinks: true, // 심볼릭 링크 따라가기
-  awaitWriteFinish: {
-    stabilityThreshold: 2000, // 파일 쓰기가 완료될 때까지 대기
-    pollInterval: 100
+// 메인 처리 함수
+async function processFiles() {
+  console.log('\n========================================');
+  console.log(`🔍 Starting check at ${new Date().toLocaleString()}`);
+  
+  // Wi-Fi 확인
+  if (!isConnectedToTargetWifi()) {
+    oldWifiConnected = false;
+    console.log('⏸️ Skipping - not connected to target Wi-Fi');
+    return;
   }
-});
 
-// 1분마다 현재 시간 출력
-// 초기 실행
+  try {
 
-function archiveClips() {
-     const now = new Date();
-console.log(`⏰ Current time: ${now.toLocaleString()}`);
-exec('touch /tmp/archive_is_unreachable', (error, stdout, stderr) => {
-    if (error) {
-        console.error(`Error executing archive-clips.sh: ${error.message}`);
-        return;
+    if( oldWifiConnected === false ) {
+      await sendMessageToDiscord(`✅ Connected to Wi-Fi: ${TARGET_WIFI_SSID}`);
+      oldWifiConnected = true;
     }
-    if (stderr) {
-        console.error(`stderr: ${stderr}`);
-    }
-    if (stdout) {
-        console.log(`stdout: ${stdout}`);
-    }
-});
-}
-
-archiveClips();
-
-// 60초마다 반복 실행
-setInterval(() => {
-    archiveClips();
-}, 60000);
-
-// 10초 대기
-console.log('⏳ Waiting 10 seconds before starting to watch for new clips...');
-await new Promise(resolve => setTimeout(resolve, 10000));
-
-console.log('done waiting. Starting watcher now.');
-
-watcher
-  .on('add', filePath => {
-    console.log(`\n📹 New file detected: ${path.basename(filePath)}`);
-    // 기존 타이머가 있으면 취소
-    if (global.uploadTimer) {
-      clearTimeout(global.uploadTimer);
+    // Wi-Fi 연결 알림 전송
+    
+    // 스냅샷 생성
+    await makeSnapshot();
+    // 5초 대기
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    // 마지막 전송 날짜 로드
+    // const lastSentDate = getLastSentDate();
+    console.log(`📅 Last sent date: ${lastSentDate.toISOString()}`);
+    
+    // 모든 폴더에서 파일 수집
+    let allFiles = [];
+    for (const folder of WATCH_FOLDERS) {
+      const files = getAllMp4Files(folder);
+      console.log(`📂 Found ${files.length} files in ${folder}`);
+      allFiles = allFiles.concat(files);
     }
     
-    // 마지막 파일 경로 저장
-    global.lastFilePath = filePath;
-    global.lastFilePathList = global.lastFilePathList || [];
-    global.lastFilePathList.push(filePath);
-    // 10초 후 마지막 파일만 전송
-    global.uploadTimer = setTimeout( async () => {
-
-        // 마지막 4개 파일만 선택
-        const filesToUpload = global.lastFilePathList.slice(-4);
-        // global.lastFilePathList = [];
-
-        // 선택된 파일들 전송
-        for (const file of filesToUpload) {
-            console.log(`⏰ Uploading: ${path.basename(file)}`);
-            await sendToDiscord('', file);
+    // 마지막 전송 날짜 이후의 파일만 필터링
+    const newFiles = allFiles.filter(file => file.mtime > lastSentDate);
+    console.log(`🆕 ${newFiles.length} new files since last upload`);
+    
+    if (newFiles.length === 0) {
+      console.log('✅ No new files to upload');
+      return;
+    }
+    
+    // 수정 시간 기준 최신순 정렬
+    newFiles.sort((a, b) => b.mtime - a.mtime);
+    
+    // 최대 4개만 선택
+    const filesToSend = newFiles.slice(0, MAX_FILES_PER_RUN);
+    console.log(`📤 Uploading ${filesToSend.length} file(s)...`);
+    
+    // 파일 전송
+    let uploadedCount = 0;
+    // let latestMtime = lastSentDate;
+    
+    for (const file of filesToSend) {
+      const success = await sendToDiscord(file);
+      if (success) {
+        uploadedCount++;
+        if (file.mtime > lastSentDate) {
+          lastSentDate = file.mtime;
         }
-
-    //   console.log(`⏰ 10 seconds elapsed. Uploading last file: ${path.basename(global.lastFilePath)}`);
-    //   sendToDiscord('', global.lastFilePath);
-    //   global.uploadTimer = null;
-    //   global.lastFilePath = null;
-    }, 10000);
+      }
+      // Discord rate limit 방지를 위해 잠시 대기
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
     
-    return; // sendToDiscord 호출 방지
-    sendToDiscord('', filePath);
-  })
-  .on('error', error => {
-    console.error('Watcher error:', error);
-  })
-  .on('ready', async() => {
-    console.log('✅ Ready for new clips!\n');
-    await sendToDiscord('🚀 Tesla USB Uploader started and monitoring for new clips.');
-  });
+    // 성공적으로 업로드된 파일이 있으면 마지막 전송 날짜 업데이트
+    // if (uploadedCount > 0) {
+    //   saveLastSentDate(latestMtime);
+    //   console.log(`✅ Uploaded ${uploadedCount} file(s). Updated last sent date to ${latestMtime.toISOString()}`);
+    // }
+    
+  } catch (error) {
+    console.error('❌ Process error:', error.message);
+  }
+}
+
+// 주기적 실행
+console.log('🚀 Tesla USB Discord Uploader Started');
+console.log(`📡 Discord webhook: ${DISCORD_WEBHOOK_URL ? 'Configured' : 'NOT CONFIGURED'}`);
+console.log(`📶 Target Wi-Fi: ${TARGET_WIFI_SSID}`);
+console.log(`⏱️ Check interval: ${CHECK_INTERVAL / 1000} seconds`);
+console.log(`📂 Watching folders:`);
+WATCH_FOLDERS.forEach(folder => console.log(`   - ${folder}`));
+console.log('========================================\n');
+
+// 즉시 한 번 실행
+processFiles().catch(err => console.error('Initial run error:', err));
+
+// 주기적 실행
+const interval = setInterval(() => {
+  processFiles().catch(err => console.error('Periodic run error:', err));
+}, CHECK_INTERVAL);
 
 // 프로세스 종료 시 정리
 process.on('SIGINT', () => {
   console.log('\n👋 Shutting down...');
-  watcher.close();
+  clearInterval(interval);
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n👋 Shutting down...');
+  clearInterval(interval);
   process.exit(0);
 });
