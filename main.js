@@ -4,6 +4,8 @@ import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 
+const { promises: fsPromises } = fs;
+
 // 설정
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'YOUR_DISCORD_WEBHOOK_URL';
 const TARGET_WIFI_SSID = process.env.WIFI_SSID || 'ehbs';
@@ -161,16 +163,27 @@ async function sendToDiscord(file) {
     
     // 파일이 TRIM_SIZE_MB 보다 크면 뒷부분만 전송
     if (file.size > TRIM_SIZE) {
-      console.log(`⚠️ File exceeds ${TRIM_SIZE_MB}MB, sending last ${TRIM_SIZE_MB}MB only`);
-      
-      const start = file.size - TRIM_SIZE;
-      const end = file.size-1;
-      
-      // 파일 스트림 생성 (뒷부분만)
-      const stream = fs.createReadStream(file.realPath, { start, end });
-      
-      form.append('file', stream, `${path.basename(file.name, '.mp4')}_last${TRIM_SIZE_MB}MB.mp4`);
-      form.append('content', `🚗 **${file.folder}**: ${file.name} (Last ${TRIM_SIZE_MB}MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      const sliceSize = Math.min(TRIM_SIZE, file.size);
+      const start = file.size - sliceSize;
+      console.log(`⚠️ File exceeds ${TRIM_SIZE_MB}MB, sending last ${(sliceSize / 1024 / 1024).toFixed(2)}MB only`);
+
+      let fileHandle;
+      try {
+        fileHandle = await fsPromises.open(file.realPath, 'r');
+        const buffer = Buffer.alloc(sliceSize);
+        const { bytesRead } = await fileHandle.read(buffer, 0, sliceSize, start);
+        const clipBuffer = buffer.slice(0, bytesRead);
+
+        form.append('file', clipBuffer, {
+          filename: `${path.basename(file.name, '.mp4')}_last${TRIM_SIZE_MB}MB.mp4`,
+          contentType: 'video/mp4'
+        });
+        form.append('content', `🚗 **${file.folder}**: ${file.name} (Last ${(bytesRead / 1024 / 1024).toFixed(2)}MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      } finally {
+        if (fileHandle) {
+          await fileHandle.close();
+        }
+      }
     } else {
       // TRIM_SIZE_MB 이하면 전체 파일 전송
       form.append('file', fs.createReadStream(file.realPath), file.name);
