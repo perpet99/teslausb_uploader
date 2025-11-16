@@ -179,7 +179,8 @@ async function sendToDiscord(file) {
     await axios.post(DISCORD_WEBHOOK_URL, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
-      maxBodyLength: Infinity
+      maxBodyLength: Infinity,
+      timeout: 30*1000 // 30초 타임아웃
     });
 
     console.log(`✅ Successfully uploaded: ${file.name}`);
@@ -269,14 +270,14 @@ async function processFiles() {
     for (const file of filesToSend) {
 
 
+      if (file.mtime > lastSentDate) {
+        lastSentDate = file.mtime;
+      }
 
       const success = await sendToDiscord(file);
-      if (success) {
-        uploadedCount++;
-        if (file.mtime > lastSentDate) {
-          lastSentDate = file.mtime;
-        }
-      }
+      // if (success) {
+      //   uploadedCount++;
+      // }
       // Discord rate limit 방지를 위해 잠시 대기
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
