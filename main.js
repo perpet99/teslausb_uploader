@@ -12,7 +12,7 @@ const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SentryClips'
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
-const TRIM_SIZE = 20 * 1024 * 1024; // 20MB - 이 크기 이상이면 뒷부분만 전송
+const TRIM_SIZE = 10 * 1024 * 1024; // 10MB - 이 크기 이상이면 뒷부분만 전송
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
