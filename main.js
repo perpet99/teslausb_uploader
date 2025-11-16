@@ -93,19 +93,19 @@ function getAllMp4Files(folderPath) {
   }
 
   function scanDir(dir) {
-    console.log(`Scanning directory: ${dir}`);
+    // console.log(`Scanning directory: ${dir}`);
 
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       
       for (const entry of entries) {
-        console.log(`Processing entry: ${entry.name}`);
-        
+        // console.log(`Processing entry: ${entry.name}`);
+
         const fullPath = path.join(dir, entry.name);
         
         if (entry.isDirectory()) {
           scanDir(fullPath);
-        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.mp4')) {
+        } else if (entry.name.endsWith('.mp4')) {
           try {
             // 심볼릭 링크인 경우 실제 경로 확인
             const realPath = fs.realpathSync(fullPath);
@@ -122,6 +122,8 @@ function getAllMp4Files(folderPath) {
           } catch (err) {
             console.warn(`Skipping ${fullPath}: ${err.message}`);
           }
+        }else{
+          console.log(`Skipping non-mp4 file: ${fullPath}`);
         }
       }
     } catch (err) {
