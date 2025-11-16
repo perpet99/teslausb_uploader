@@ -14,8 +14,9 @@ const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SentryClips'
 ];
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
-const TRIM_SIZE = 10 * 1024 * 1024; // 10MB - 이 크기 이상이면 뒷부분만 전송
-const TRIM_SIZE_MB = Math.round(TRIM_SIZE / (1024 * 1024));
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk size
+const CHUNK_SIZE_MB = Math.round(CHUNK_SIZE / (1024 * 1024));
+const CHUNK_TEMP_DIR = '/tmp/teslausb_chunks';
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
@@ -154,54 +155,119 @@ async function sendMessageToDiscord(message) {
     }
 }
 
+// 대용량 파일을 임시 디렉터리에 10MB씩 분할
+async function splitFileIntoChunks(filePath, baseName) {
+  const timestamp = Date.now();
+  const chunkDir = path.join(CHUNK_TEMP_DIR, `${baseName}_${timestamp}`);
+  await fsPromises.mkdir(chunkDir, { recursive: true });
+
+  const chunks = [];
+  const handle = await fsPromises.open(filePath, 'r');
+  const { size: totalSize } = await handle.stat();
+  const buffer = Buffer.alloc(CHUNK_SIZE);
+  let offset = 0;
+  let index = 1;
+
+  try {
+    while (offset < totalSize) {
+      const { bytesRead } = await handle.read(buffer, 0, CHUNK_SIZE, offset);
+      if (bytesRead === 0) {
+        break;
+      }
+
+      const chunkName = `${baseName}_part${String(index).padStart(3, '0')}.mp4`;
+      const chunkPath = path.join(chunkDir, chunkName);
+      await fsPromises.writeFile(chunkPath, Buffer.from(buffer.slice(0, bytesRead)));
+      chunks.push({ path: chunkPath, name: chunkName, size: bytesRead });
+
+      offset += bytesRead;
+      index += 1;
+    }
+  } finally {
+    await handle.close();
+  }
+
+  if (chunks.length === 0) {
+    throw new Error('No chunks were created from file.');
+  }
+
+  return { dir: chunkDir, chunks };
+}
+
+// 임시 분할 파일 정리
+async function cleanupChunkDirectory(dirPath) {
+  try {
+    await fsPromises.rm(dirPath, { recursive: true, force: true });
+  } catch (cleanupError) {
+    console.warn(`Cleanup warning for ${dirPath}: ${cleanupError.message}`);
+  }
+}
+
 // 디스코드로 파일 전송
 async function sendToDiscord(file) {
   try {
     console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-    const form = new FormData();
-    
-    // 파일이 TRIM_SIZE_MB 보다 크면 뒷부분만 전송
-    if (file.size > TRIM_SIZE) {
-      const sliceSize = Math.min(TRIM_SIZE, file.size);
-      const start = file.size - sliceSize;
-      console.log(`⚠️ File exceeds ${TRIM_SIZE_MB}MB, sending last ${(sliceSize / 1024 / 1024).toFixed(2)}MB only`);
+    // 파일이 10MB보다 크면 임시 폴더에 10MB씩 분할하여 전송
+    if (file.size > CHUNK_SIZE) {
+      const baseName = path.basename(file.name, path.extname(file.name));
+      let chunkDir = null;
 
-      let fileHandle;
       try {
-        fileHandle = await fsPromises.open(file.realPath, 'r');
-        const buffer = Buffer.alloc(sliceSize);
-        const { bytesRead } = await fileHandle.read(buffer, 0, sliceSize, start);
-        const clipBuffer = buffer.slice(0, bytesRead);
+        const { dir, chunks } = await splitFileIntoChunks(file.realPath, baseName);
+        chunkDir = dir;
 
-        form.append('file', clipBuffer, {
-          filename: `${path.basename(file.name, '.mp4')}_last${TRIM_SIZE_MB}MB.mp4`,
-          contentType: 'video/mp4'
-        });
-        form.append('content', `🚗 **${file.folder}**: ${file.name} (Last ${(bytesRead / 1024 / 1024).toFixed(2)}MB / Total: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+        console.log(`📦 Split into ${chunks.length} chunk(s)`);
+
+        for (let i = 0; i < chunks.length; i += 1) {
+          const chunk = chunks[i];
+          const form = new FormData();
+          form.append('file', fs.createReadStream(chunk.path), chunk.name);
+          form.append(
+            'content',
+            `🚗 **${file.folder}**: ${file.name} (Part ${i + 1}/${chunks.length}, ${(chunk.size / 1024 / 1024).toFixed(2)} MB of ${(file.size / 1024 / 1024).toFixed(2)} MB)`
+          );
+
+          await axios.post(DISCORD_WEBHOOK_URL, form, {
+            headers: form.getHeaders(),
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            timeout: 30 * 1000
+          });
+
+          console.log(`   ✅ Uploaded chunk ${i + 1}/${chunks.length}`);
+
+          if (i < chunks.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+
+        console.log(`✅ Successfully uploaded all chunks for: ${file.name}`);
+        return true;
       } finally {
-        if (fileHandle) {
-          await fileHandle.close();
+        if (chunkDir) {
+          await cleanupChunkDirectory(chunkDir);
         }
       }
-    } else {
-      // TRIM_SIZE_MB 이하면 전체 파일 전송
-      form.append('file', fs.createReadStream(file.realPath), file.name);
-      form.append('content', `🚗 **${file.folder}**: ${file.name}`);
     }
+
+    // 10MB 이하면 전체 파일 전송
+    const form = new FormData();
+    form.append('file', fs.createReadStream(file.realPath), file.name);
+    form.append('content', `🚗 **${file.folder}**: ${file.name}`);
 
     await axios.post(DISCORD_WEBHOOK_URL, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
-      timeout: 30*1000 // 30초 타임아웃
+      timeout: 30 * 1000
     });
 
     console.log(`✅ Successfully uploaded: ${file.name}`);
     return true;
   } catch (error) {
     console.error(`❌ Error uploading ${file.name}:`, error.message);
-    
+
     try {
       await axios.post(DISCORD_WEBHOOK_URL, {
         content: `❌ Failed to upload: **${file.name}**\nError: ${error.message}`
@@ -284,14 +350,14 @@ async function processFiles() {
     for (const file of filesToSend) {
 
 
-      if (file.mtime > lastSentDate) {
-        lastSentDate = file.mtime;
-      }
+        if (file.mtime > lastSentDate) {
+          lastSentDate = file.mtime;
+        }
 
       const success = await sendToDiscord(file);
-      // if (success) {
-      //   uploadedCount++;
-      // }
+      if (success) {
+        uploadedCount++;
+      }
       // Discord rate limit 방지를 위해 잠시 대기
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
