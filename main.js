@@ -1,8 +1,9 @@
-import { execSync, exec } from 'child_process';
+import { execSync, exec ,spawn} from 'child_process';
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
+
 
 // 설정
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'YOUR_DISCORD_WEBHOOK_URL';
@@ -84,6 +85,7 @@ function makeSnapshot() {
     });
   });
 }
+
 
 // 폴더에서 모든 mp4 파일 재귀적으로 수집
 function getAllMp4Files(folderPath) {
@@ -283,6 +285,95 @@ async function sendToDiscord(file) {
   }
 }
 
+function runFFmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    ff.stdout.on('data', d => process.stdout.write(d.toString()));
+    ff.stderr.on('data', d => process.stderr.write(d.toString())); // ffmpeg progress logs
+    ff.on('close', code => (code === 0 ? resolve() : reject(new Error(`FFmpeg exited ${code}`))));
+  });
+}
+
+
+async function runGrid2x2(files) {
+  if (files.length !== 4) {
+    // throw new Error(`Expected 4 files, but got ${files.length}`);
+    return null
+  }
+
+  const args = [
+    '-y',
+    '-i', files[0],
+    '-i', files[1],
+    '-i', files[2],
+    '-i', files[3],
+    '-filter_complex',
+    '[0:v]scale=640:480,format=yuv420p[v0];' +
+    '[1:v]scale=640:480,format=yuv420p[v1];' +
+    '[2:v]scale=640:480,format=yuv420p[v2];' +
+    '[3:v]scale=640:480,format=yuv420p[v3];' +
+    '[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];' +
+    '[top][bottom]vstack=inputs=2[out]',
+    '-map', '[out]',
+    '-c:v', 'libx264',
+    '-crf', '18',
+    '-preset', 'slow',
+    '-r', '10',
+    '-pix_fmt', 'yuv420p',
+    'output_grid.mp4',
+  ];
+  await runFFmpeg(args);
+
+  return 'output_grid.mp4';
+}
+
+// 4개의 파일을 ffmpeg로 합치기
+async function mergeVideos(files) {
+  if (files.length !== 4) {
+    throw new Error(`Expected 4 files, but got ${files.length}`);
+  }
+
+  try {
+    console.log('🎬 Merging 4 videos with ffmpeg...');
+    
+    // 임시 디렉토리 생성
+    if (!fs.existsSync(TEMP_SPLIT_DIR)) {
+      fs.mkdirSync(TEMP_SPLIT_DIR, { recursive: true });
+    }
+    
+    // 임시 파일 목록 생성
+    const fileListPath = path.join(TEMP_SPLIT_DIR, 'filelist.txt');
+    
+    // ffmpeg concat 파일 포맷으로 작성
+    const fileListContent = files
+      .map(file => `file '${file.realPath}'`)
+      .join('\n');
+    fs.writeFileSync(fileListPath, fileListContent, 'utf8');
+    
+    // 합쳐진 파일 경로
+    const mergedFileName = `merged_${Date.now()}.mp4`;
+    const mergedFilePath = path.join(TEMP_SPLIT_DIR, mergedFileName);
+    
+    // ffmpeg로 합치기
+    execSync(
+      `ffmpeg -y -f concat -safe 0 -i "${fileListPath}" -c copy "${mergedFilePath}"`,
+      { encoding: 'utf8' }
+    );
+    
+    console.log(`✅ Videos merged successfully: ${mergedFilePath}`);
+    
+    // 파일 목록 정리
+    fs.unlinkSync(fileListPath);
+    
+    return mergedFilePath;
+    
+  } catch (error) {
+    console.error('❌ Error merging videos:', error.message);
+    throw error;
+  }
+}
+
 // 메인 처리 함수
 async function processFiles() {
   console.log('\n========================================');
@@ -351,20 +442,83 @@ async function processFiles() {
       return;
     }
 
-    for (const file of filesToSend) {
+    // // 4개의 파일이 있으면 ffmpeg로 합치기
+    // if (filesToSend.length === 4) {
+    //   try {
+    //     console.log('🎬 Merging 4 videos with ffmpeg...');
+        
+    //     // 임시 파일 목록 생성
+    //     const fileListPath = path.join(TEMP_SPLIT_DIR, 'filelist.txt');
+    //     if (!fs.existsSync(TEMP_SPLIT_DIR)) {
+    //       fs.mkdirSync(TEMP_SPLIT_DIR, { recursive: true });
+    //     }
+        
+    //     // ffmpeg concat 파일 포맷으로 작성
+    //     const fileListContent = filesToSend
+    //       .map(file => `file '${file.realPath}'`)
+    //       .join('\n');
+    //     fs.writeFileSync(fileListPath, fileListContent, 'utf8');
+        
+    //     // 합쳐진 파일 경로
+    //     const mergedFileName = `merged_${Date.now()}.mp4`;
+    //     const mergedFilePath = path.join(TEMP_SPLIT_DIR, mergedFileName);
+        
+    //     // ffmpeg로 합치기
+    //     execSync(
+    //       `ffmpeg -f concat -safe 0 -i "${fileListPath}" -c copy "${mergedFilePath}"`,
+    //       { encoding: 'utf8' }
+    //     );
+        
+    //     console.log(`✅ Videos merged successfully: ${mergedFilePath}`);
+        
+    //     // 합쳐진 파일 전송
+    //     const mergedFile = {
+    //       path: mergedFilePath,
+    //       realPath: mergedFilePath,
+    //       name: mergedFileName,
+    //       size: fs.statSync(mergedFilePath).size,
+    //       mtime: new Date(),
+    //       folder: 'Merged'
+    //     };
+        
+    //     const success = await sendToDiscord(mergedFile);
+    //     if (success) {
+    //       uploadedCount++;
+          
+    //       // 합쳐진 파일과 파일 목록 정리
+    //       fs.unlinkSync(mergedFilePath);
+    //       fs.unlinkSync(fileListPath);
+    //     }
+        
+    //     console.log('✅ Merged video uploaded and cleaned up');
+        
+    //     // 개별 파일은 건너뛰기
+    //     continue;
+        
+    //   } catch (error) {
+    //     console.error('❌ Error merging videos:', error.message);
+    //     // 에러 발생 시 개별 파일 전송 진행
+    //   }
+    // }
+
+    const outputFileName = await runGrid2x2 (filesToSend)
+
+    console.log(`📤 Uploading merged grid video: ${outputFileName}`);
+
+    // for (const file of filesToSend) {
 
 
-        if (file.mtime > lastSentDate) {
-          lastSentDate = file.mtime;
-        }
+    //     if (file.mtime > lastSentDate) {
+    //       lastSentDate = file.mtime;
+    //     }
 
-      const success = await sendToDiscord(file);
-      if (success) {
-        uploadedCount++;
-      }
-      // Discord rate limit 방지를 위해 잠시 대기
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    //   const success = await sendToDiscord(file);
+    //   if (success) {
+    //     uploadedCount++;
+    //   }
+    //   // Discord rate limit 방지를 위해 잠시 대기
+    //   await new Promise(resolve => setTimeout(resolve, 1000));
+    // }
     
     // 성공적으로 업로드된 파일이 있으면 마지막 전송 날짜 업데이트
     // if (uploadedCount > 0) {
