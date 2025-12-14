@@ -278,13 +278,13 @@ async function runGrid2x2(files, outputFileName) {
 
   const args = [
     '-y',
-    '-sseof', ' -15',
+    '-sseof', ' -30',
     '-i', files[0].path,
-    '-sseof', ' -15',
+    '-sseof', ' -30',
     '-i', files[1].path,
-    '-sseof', ' -15',
+    '-sseof', ' -30',
     '-i', files[2].path,
-    '-sseof', ' -15',
+    '-sseof', ' -30',
     '-i', files[3].path,
     '-filter_complex',
     '[0:v]scale=640:480,format=yuv420p[v0];' +
@@ -302,6 +302,30 @@ async function runGrid2x2(files, outputFileName) {
     '-b:v', '5M',
     outputFileName,
   ];
+
+  // const args = [
+  //   '-y',
+  //   '-i', files[0].path,
+  //   '-i', files[1].path,
+  //   '-i', files[2].path,
+  //   '-i', files[3].path,
+  //   '-filter_complex',
+  //   '[0:v]scale=640:480,format=yuv420p[v0];' +
+  //   '[1:v]scale=640:480,format=yuv420p[v1];' +
+  //   '[2:v]scale=640:480,format=yuv420p[v2];' +
+  //   '[3:v]scale=640:480,format=yuv420p[v3];' +
+  //   '[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];' +
+  //   '[top][bottom]vstack=inputs=2[out]',
+  //   '-map', '[out]',
+  //   '-c:v', 'h264_v4l2m2m',
+  //   '-crf', '18',
+  //   '-preset', 'slow',
+  //   '-r', '10',
+  //   '-pix_fmt', 'yuv420p',
+  //   '-b:v', '5M',
+  //   outputFileName,
+  // ];
+
   await runFFmpeg(args);
 
   return outputFileName;
@@ -403,13 +427,19 @@ async function processFiles() {
         
         await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
 
+        const startTime = Date.now();
         await runGrid2x2 (files, outputFileName);
+        const endTime = Date.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(0);
+        const minutes = Math.floor(duration / 60);
+        const seconds = (duration % 60).toFixed(0);
+        console.log(`⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
         const stats = fs.statSync(outputFileName);
         const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
         console.log(`📊 Output file size: ${fileSizeMB} MB`);
 
-        await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB`);
+        await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB\n⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
         await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
       }
