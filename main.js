@@ -474,7 +474,7 @@ async function processFiles() {
 
             const stats = fs.statSync(file.path);
             const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-            await sendMessageToDiscord(`🚗 Tesla front file size: ${fileSizeMB} MB`);
+            await sendMessageToDiscord(`🚗 Tesla front file size: ${fileSizeMB} MB\n add timestamp tool : https://teslacamconverter.netlify.app/`);
 
             await runFFmepgByTime(file.path, '0', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 0~15:', outputFileName);
