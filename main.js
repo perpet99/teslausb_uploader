@@ -278,13 +278,13 @@ async function runGrid2x2(files, outputFileName) {
 
   const args = [
     '-y',
-    '-sseof', ' -30',
+    '-sseof', ' -20',
     '-i', files[0].path,
-    '-sseof', ' -30',
+    '-sseof', ' -20',
     '-i', files[1].path,
-    '-sseof', ' -30',
+    '-sseof', ' -20',
     '-i', files[2].path,
-    '-sseof', ' -30',
+    '-sseof', ' -20',
     '-i', files[3].path,
     '-filter_complex',
     '[0:v]scale=640:480,format=yuv420p[v0];' +
