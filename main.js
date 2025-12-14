@@ -440,7 +440,7 @@ async function processFiles() {
 
       if( lastSentDate){
         // const outputFileName = folderKey+'.mp4';
-        const outputFileName = 'output.mp4';
+        const outputFileName = '/mutable/output.mp4';
         
         await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
 
@@ -468,7 +468,7 @@ async function processFiles() {
 
         if( lastSentDate){
 
-          const outputFileName = 'output.mp4';
+          const outputFileName = '/mutable/output.mp4';
 
           if (file.name.includes('-front')) {
 
