@@ -81,6 +81,10 @@ WantedBy=multi-user.target
 sudo systemctl enable teslausb-uploader
 sudo systemctl start teslausb-uploader
 sudo systemctl status teslausb-uploader
+
+sudo journalctl -u teslausb-uploader -f
+sudo journalctl -u teslausb-uploader -n 100
+
 ```
 
 ## Configuration

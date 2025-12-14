@@ -270,7 +270,7 @@ function runFFmpeg(args) {
 }
 
 
-async function runFFmepgByTime(fileName, start, duration) {
+async function runFFmepgByTime(fileName, start, duration,outputFileName) {
 
   // ffmpeg -ss 90 -i input.mp4 -t 30 -c copy output_last30.mp4
 
@@ -468,10 +468,14 @@ async function processFiles() {
 
         if (file.name.includes('-front')) {
 
-          await runFFmepgByTime(file.path, '0', '15');
-          await runFFmepgByTime(file.path, '15', '15');
-          await runFFmepgByTime(file.path, '30', '15');
-          await runFFmepgByTime(file.path, '45', '15');
+          await runFFmepgByTime(file.path, '0', '15',outputFileName);
+          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
+          await runFFmepgByTime(file.path, '15', '15',outputFileName);
+          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
+          await runFFmepgByTime(file.path, '30', '15',outputFileName);
+          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
+          await runFFmepgByTime(file.path, '45', '15',outputFileName);
+          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
 
         }
 
