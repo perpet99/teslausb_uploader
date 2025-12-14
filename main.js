@@ -258,65 +258,6 @@ async function sendMessageToDiscord(message) {
     }
 }
 
-// 파일을 10MB 청크로 분할
-async function splitFileIntoChunks(file) {
-  const chunks = [];
-  const baseName = path.basename(file.name, '.mp4');
-  
-  // 임시 디렉토리 생성
-  if (!fs.existsSync(TEMP_SPLIT_DIR)) {
-    fs.mkdirSync(TEMP_SPLIT_DIR, { recursive: true });
-  }
-  
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-  console.log(`📦 Splitting file into ${totalChunks} chunks of ${CHUNK_SIZE / 1024 / 1024}MB each`);
-  
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    const chunkSize = end - start;
-    
-    const chunkFileName = `${baseName}_part${String(i + 1).padStart(3, '0')}.mp4`;
-    const chunkPath = path.join(TEMP_SPLIT_DIR, chunkFileName);
-    
-    // 청크 데이터 읽기
-    const buffer = Buffer.alloc(chunkSize);
-    const fd = fs.openSync(file.realPath, 'r');
-    fs.readSync(fd, buffer, 0, chunkSize, start);
-    fs.closeSync(fd);
-    
-    // 임시 파일로 저장
-    fs.writeFileSync(chunkPath, buffer);
-    
-    chunks.push({
-      path: chunkPath,
-      name: chunkFileName,
-      size: chunkSize,
-      partNumber: i + 1,
-      totalParts: totalChunks
-    });
-    
-    console.log(`   Created chunk ${i + 1}/${totalChunks}: ${chunkFileName} (${(chunkSize / 1024 / 1024).toFixed(2)} MB)`);
-  }
-  
-  return chunks;
-}
-
-// 임시 청크 파일들 정리
-function cleanupChunks() {
-  try {
-    if (fs.existsSync(TEMP_SPLIT_DIR)) {
-      const files = fs.readdirSync(TEMP_SPLIT_DIR);
-      for (const file of files) {
-        fs.unlinkSync(path.join(TEMP_SPLIT_DIR, file));
-      }
-      console.log('🧹 Cleaned up chunk files');
-    }
-  } catch (error) {
-    console.error('Error cleaning up chunks:', error.message);
-  }
-}
-
 
 function runFFmpeg(args) {
   return new Promise((resolve, reject) => {
@@ -337,9 +278,13 @@ async function runGrid2x2(files, outputFileName) {
 
   const args = [
     '-y',
+    '-sseof', ' -15',
     '-i', files[0].path,
+    '-sseof', ' -15',
     '-i', files[1].path,
+    '-sseof', ' -15',
     '-i', files[2].path,
+    '-sseof', ' -15',
     '-i', files[3].path,
     '-filter_complex',
     '[0:v]scale=640:480,format=yuv420p[v0];' +
