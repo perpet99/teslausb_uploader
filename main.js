@@ -270,6 +270,23 @@ function runFFmpeg(args) {
 }
 
 
+async function runFFmepgByTime(fileName, start, duration) {
+
+  // ffmpeg -ss 90 -i input.mp4 -t 30 -c copy output_last30.mp4
+
+  const args = [
+    '-y',
+    '-ss', start,
+    '-i', fileName,
+    '-t', duration,
+    '-c', 'copy',
+    outputFileName,
+  ];
+
+  await runFFmpeg(args);
+
+}
+
 async function runGrid2x2(files, outputFileName) {
   if (files.length !== 4) {
     // throw new Error(`Expected 4 files, but got ${files.length}`);
@@ -287,10 +304,10 @@ async function runGrid2x2(files, outputFileName) {
     '-sseof', ' -20',
     '-i', files[3].path,
     '-filter_complex',
-    '[0:v]scale=640:480,format=yuv420p[v0];' +
-    '[1:v]scale=640:480,format=yuv420p[v1];' +
-    '[2:v]scale=640:480,format=yuv420p[v2];' +
-    '[3:v]scale=640:480,format=yuv420p[v3];' +
+    '[0:v]scale=320:240,format=yuv420p[v0];' +
+    '[1:v]scale=320:240,format=yuv420p[v1];' +
+    '[2:v]scale=320:240,format=yuv420p[v2];' +
+    '[3:v]scale=320:240,format=yuv420p[v3];' +
     '[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];' +
     '[top][bottom]vstack=inputs=2[out]',
     '-map', '[out]',
@@ -444,10 +461,20 @@ async function processFiles() {
         await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
       }
 
-      files.forEach((file, index) => {
+      files.forEach(async (file, index) => {
         if (file.mtime > newLastSentDate) {
           newLastSentDate = file.mtime;
         }
+
+        if (file.name.includes('-front')) {
+
+          await runFFmepgByTime(file.path, '0', '15');
+          await runFFmepgByTime(file.path, '15', '15');
+          await runFFmepgByTime(file.path, '30', '15');
+          await runFFmepgByTime(file.path, '45', '15');
+
+        }
+
         console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
       });
     }
