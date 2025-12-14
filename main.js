@@ -466,19 +466,22 @@ async function processFiles() {
           newLastSentDate = file.mtime;
         }
 
-        if (file.name.includes('-front')) {
+        if( lastSentDate){
 
-          await runFFmepgByTime(file.path, '0', '15',outputFileName);
-          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
-          await runFFmepgByTime(file.path, '15', '15',outputFileName);
-          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
-          await runFFmepgByTime(file.path, '30', '15',outputFileName);
-          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
-          await runFFmepgByTime(file.path, '45', '15',outputFileName);
-          await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
+          const outputFileName = 'output.mp4';
 
+          if (file.name.includes('-front')) {
+
+            await runFFmepgByTime(file.path, '0', '15',outputFileName);
+            await sendToDiscord('🚗 Tesla front file 0~15:', outputFileName);
+            await runFFmepgByTime(file.path, '15', '15',outputFileName);
+            await sendToDiscord('🚗 Tesla front file 15~30:', outputFileName);
+            await runFFmepgByTime(file.path, '30', '15',outputFileName);
+            await sendToDiscord('🚗 Tesla front file 30~45:', outputFileName);
+            await runFFmepgByTime(file.path, '45', '15',outputFileName);
+            await sendToDiscord('🚗 Tesla front file 45~60:', outputFileName);
+          }
         }
-
         console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
       });
     }
