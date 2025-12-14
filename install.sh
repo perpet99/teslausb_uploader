@@ -136,6 +136,55 @@ else
     echo "⚠️ main.js file not found."
 fi
 
+# Register systemd service
+echo ""
+echo "🔧 Setting up systemd service..."
+
+SERVICE_FILE="${INSTALL_DIR}/teslausb-uploader.service"
+
+if [ ! -f "$SERVICE_FILE" ]; then
+    echo "⚠️ Service file not found. Creating..."
+    
+    cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=Tesla USB Uploader Service
+After=network.target
+
+[Service]
+Type=simple
+User=${USER}
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=/usr/bin/node ${INSTALL_DIR}/main.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    echo "✅ Service file created: ${SERVICE_FILE}"
+fi
+
+echo ""
+echo "📋 Would you like to register the systemd service now? (y/n)"
+read -r REGISTER_SERVICE
+
+if [ "$REGISTER_SERVICE" = "y" ] || [ "$REGISTER_SERVICE" = "Y" ]; then
+    echo "   Registering service (sudo privileges required)..."
+    sudo cp "$SERVICE_FILE" /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable teslausb-uploader
+    echo "✅ Service registered and enabled"
+    echo ""
+    echo "   Start the service with: sudo systemctl start teslausb-uploader"
+    echo "   Check status with: sudo systemctl status teslausb-uploader"
+else
+    echo "⏭️ Service registration skipped"
+fi
+
+
 # Installation complete
 echo ""
 echo "======================================"

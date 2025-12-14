@@ -3,11 +3,14 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
 
+// .env 파일 로드
+dotenv.config();
 
 // 설정
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'YOUR_DISCORD_WEBHOOK_URL';
-const TARGET_WIFI_SSID = process.env.WIFI_SSID || 'ehbs';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'none';
+const TARGET_WIFI_SSID = process.env.WIFI_SSID || 'none';
 const WATCH_FOLDERS = [
   '/mutable/TeslaCam/SavedClips',
   '/mutable/TeslaCam/SentryClips'
@@ -18,7 +21,7 @@ const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
 const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
 const TEMP_SPLIT_DIR = '/tmp/video_split_chunks'; // 임시 분할 파일 저장 폴더
-let lastSentDate = null
+let lastSentDate = null;
 let oldWifiConnected = false;
 
 // 마지막 전송 날짜 로드
@@ -87,6 +90,107 @@ function makeSnapshot() {
 }
 
 
+// 디스코드로 파일 전송
+async function sendToDiscord(text = '', filePath = null) {
+  let fileName = 'none';
+
+  try {
+    const form = new FormData();
+    
+    if (filePath != null) {
+      const realPath = fs.realpathSync(filePath);
+      const stats = fs.statSync(realPath);
+      fileName = path.basename(filePath);
+      
+      console.log(`Processing: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
+      form.append('file', fs.createReadStream(realPath), fileName);  
+    }
+    
+    if (text == '') {
+      form.append('content', `🚗 Tesla clip: **${fileName}**`);
+    } else {
+      form.append('content', text);
+    }
+
+    await axios.post(DISCORD_WEBHOOK_URL, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+
+    console.log(`✅ Successfully uploaded: ${fileName}`);
+  } catch (error) {
+    console.error(`❌ Error uploading ${fileName}:`, error.message);
+  }
+}
+
+
+// 폴더별 최신 파일 4개씩 수집
+function getAllMp4FilesByFolder(rootPath,folderMap) {
+  // const folderMap = new Map();
+  
+  if (!fs.existsSync(rootPath)) {
+    console.log(`⚠️ Root path does not exist: ${rootPath}`);
+    return folderMap;
+  }
+
+  function scanDir(folderKey, dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          scanDir(entry.name, fullPath);
+        } else if (entry.name.endsWith('.mp4')) {
+          try {
+
+            
+            const realPath = fs.realpathSync(fullPath);
+            const stats = fs.statSync(realPath);
+            
+            if( lastSentDate && stats.mtime <= lastSentDate ) {
+              // console.log(`Skipping old file: ${fullPath}`);
+              continue;
+            }
+
+            // const folderKey = dir;
+            
+            if (!folderMap.has(folderKey)) {
+              folderMap.set(folderKey, []);
+            }
+            
+            folderMap.get(folderKey).push({
+              path: fullPath,
+              realPath: realPath,
+              name: entry.name,
+              size: stats.size,
+              mtime: stats.mtime,
+              folder: path.basename(dir)
+            });
+          } catch (err) {
+            console.warn(`Skipping ${fullPath}: ${err.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`Cannot read directory ${dir}: ${err.message}`);
+    }
+  }
+
+  scanDir('root', rootPath);
+  
+  // 각 폴더별로 최신 4개만 유지
+  for (const [folder, files] of folderMap.entries()) {
+    files.sort((a, b) => b.mtime - a.mtime);
+    folderMap.set(folder, files.slice(0, 4));
+  }
+  
+  return folderMap;
+}
+
 // 폴더에서 모든 mp4 파일 재귀적으로 수집
 function getAllMp4Files(folderPath) {
   const files = [];
@@ -96,7 +200,7 @@ function getAllMp4Files(folderPath) {
     return files;
   }
 
-  function scanDir(dir) {
+  function scanDir(pathKey,dir) {
     // console.log(`Scanning directory: ${dir}`);
 
     try {
@@ -108,7 +212,7 @@ function getAllMp4Files(folderPath) {
         const fullPath = path.join(dir, entry.name);
         
         if (entry.isDirectory()) {
-          scanDir(fullPath);
+          scanDir(entry.name,fullPath);
         } else if (entry.name.endsWith('.mp4')) {
           try {
             // 심볼릭 링크인 경우 실제 경로 확인
@@ -135,7 +239,7 @@ function getAllMp4Files(folderPath) {
     }
   }
 
-  scanDir(folderPath);
+  scanDir('root',folderPath);
   return files;
 }
 
@@ -213,77 +317,6 @@ function cleanupChunks() {
   }
 }
 
-// 디스코드로 파일 전송
-async function sendToDiscord(file) {
-  try {
-    console.log(`Processing: ${file.name} from ${file.folder} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-
-    // 10MB보다 크면 분할해서 전송
-    if (file.size > CHUNK_SIZE) {
-      console.log(`⚠️ File exceeds ${CHUNK_SIZE / 1024 / 1024}MB, splitting into chunks...`);
-      
-      const chunks = await splitFileIntoChunks(file);
-      
-      // 각 청크 전송
-      for (const chunk of chunks) {
-        const form = new FormData();
-        console.log(`   Uploading part ${chunk.partNumber}/${chunk.totalParts}: ${chunk.path},  ${chunk.name} (${(chunk.size / 1024 / 1024).toFixed(2)} MB)`);
-
-        form.append('file', fs.createReadStream(chunk.path), chunk.name);
-        form.append('content', `🚗 **${file.folder}**: ${file.name} (Part ${chunk.partNumber}/${chunk.totalParts})`);
-
-        await axios.post(DISCORD_WEBHOOK_URL, form, {
-          headers: form.getHeaders(),
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-          timeout: 30*1000
-        });
-
-        console.log(`   ✅ Uploaded part ${chunk.partNumber}/${chunk.totalParts}`);
-        
-        // Discord rate limit 방지
-        if (chunk.partNumber < chunk.totalParts) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-      
-      // 청크 파일 정리
-      cleanupChunks();
-      
-      console.log(`✅ Successfully uploaded all ${chunks.length} parts of: ${file.name}`);
-      return true;
-    } else {
-      // 10MB 이하면 전체 파일 전송
-      const form = new FormData();
-      form.append('file', fs.createReadStream(file.realPath), file.name);
-      form.append('content', `🚗 **${file.folder}**: ${file.name}`);
-
-      await axios.post(DISCORD_WEBHOOK_URL, form, {
-        headers: form.getHeaders(),
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        timeout: 30*1000
-      });
-
-      console.log(`✅ Successfully uploaded: ${file.name}`);
-      return true;
-    }
-  } catch (error) {
-    console.error(`❌ Error uploading ${file.name}:`, error.message);
-    
-    // 에러 발생 시 청크 파일 정리
-    cleanupChunks();
-    
-    try {
-      await axios.post(DISCORD_WEBHOOK_URL, {
-        content: `❌ Failed to upload: **${file.name}**\nError: ${error.message}`
-      });
-    } catch (notifyError) {
-      console.error('Failed to send error notification:', notifyError.message);
-    }
-    return false;
-  }
-}
 
 function runFFmpeg(args) {
   return new Promise((resolve, reject) => {
@@ -296,7 +329,7 @@ function runFFmpeg(args) {
 }
 
 
-async function runGrid2x2(files) {
+async function runGrid2x2(files, outputFileName) {
   if (files.length !== 4) {
     // throw new Error(`Expected 4 files, but got ${files.length}`);
     return null
@@ -304,10 +337,10 @@ async function runGrid2x2(files) {
 
   const args = [
     '-y',
-    '-i', files[0],
-    '-i', files[1],
-    '-i', files[2],
-    '-i', files[3],
+    '-i', files[0].path,
+    '-i', files[1].path,
+    '-i', files[2].path,
+    '-i', files[3].path,
     '-filter_complex',
     '[0:v]scale=640:480,format=yuv420p[v0];' +
     '[1:v]scale=640:480,format=yuv420p[v1];' +
@@ -316,16 +349,17 @@ async function runGrid2x2(files) {
     '[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];' +
     '[top][bottom]vstack=inputs=2[out]',
     '-map', '[out]',
-    '-c:v', 'libx264',
+    '-c:v', 'h264_v4l2m2m',
     '-crf', '18',
     '-preset', 'slow',
     '-r', '10',
     '-pix_fmt', 'yuv420p',
-    'output_grid.mp4',
+    '-b:v', '5M',
+    outputFileName,
   ];
   await runFFmpeg(args);
 
-  return 'output_grid.mp4';
+  return outputFileName;
 }
 
 // 4개의 파일을 ffmpeg로 합치기
@@ -403,105 +437,61 @@ async function processFiles() {
     // console.log(`📅 Last sent date: ${lastSentDate.toISOString()}`);
     
     // 모든 폴더에서 파일 수집
-    let allFiles = [];
+    // let allFiles = [];
+    const folderMap = new Map();
+
     for (const folder of WATCH_FOLDERS) {
-      const files = getAllMp4Files(folder);
-      console.log(`📂 Found ${files.length} files in ${folder}`);
-      allFiles = allFiles.concat(files);
+      getAllMp4FilesByFolder(folder,folderMap);
+      // console.log(`📂 Found ${files.length} files in ${folder}`);
+      // allFiles = allFiles.concat(files);
     }
     
-    // 마지막 전송 날짜 이후의 파일만 필터링
-    const newFiles = allFiles.filter(file => lastSentDate ? file.mtime > lastSentDate : true);
-    console.log(`🆕 ${newFiles.length} new files since last upload`);
-    
-    if (newFiles.length === 0) {
-      console.log('✅ No new files to upload');
-      return;
-    }
-    
-    // 수정 시간 기준 최신순 정렬
-    newFiles.sort((a, b) => b.mtime - a.mtime);
-    
-    // 최대 4개만 선택
-    const filesToSend = newFiles.slice(0, MAX_FILES_PER_RUN);
-    console.log(`📤 Uploading ${filesToSend.length} file(s)...`);
-    
-    // 파일 전송
-    let uploadedCount = 0;
-    // let latestMtime = lastSentDate;
-    if( lastSentDate == null ) {
-      lastSentDate = new Date(0);
+    // folderMap 정보 출력
+    let newLastSentDate = lastSentDate;
+    for (const [folderKey, files] of folderMap.entries()) {
+      console.log(`\n📁 Folder: ${folderKey}`);
+      console.log(`   Files count: ${files.length}`);
+
+      if( lastSentDate){
+        // const outputFileName = folderKey+'.mp4';
+        const outputFileName = 'output.mp4';
         
-      for (const file of filesToSend) {
-        if (file.mtime > lastSentDate) {
-          lastSentDate = file.mtime;
-        }
+        await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
+
+        await runGrid2x2 (files, outputFileName);
+
+        const stats = fs.statSync(outputFileName);
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        console.log(`📊 Output file size: ${fileSizeMB} MB`);
+
+        await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB`);
+
+        await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
       }
 
-      console.log(`📅 Initial last sent date set to epoch start.`,lastSentDate);
-      return;
+      files.forEach((file, index) => {
+        if (file.mtime > newLastSentDate) {
+          newLastSentDate = file.mtime;
+        }
+        console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
+      });
     }
 
-    // // 4개의 파일이 있으면 ffmpeg로 합치기
-    // if (filesToSend.length === 4) {
-    //   try {
-    //     console.log('🎬 Merging 4 videos with ffmpeg...');
-        
-    //     // 임시 파일 목록 생성
-    //     const fileListPath = path.join(TEMP_SPLIT_DIR, 'filelist.txt');
-    //     if (!fs.existsSync(TEMP_SPLIT_DIR)) {
-    //       fs.mkdirSync(TEMP_SPLIT_DIR, { recursive: true });
-    //     }
-        
-    //     // ffmpeg concat 파일 포맷으로 작성
-    //     const fileListContent = filesToSend
-    //       .map(file => `file '${file.realPath}'`)
-    //       .join('\n');
-    //     fs.writeFileSync(fileListPath, fileListContent, 'utf8');
-        
-    //     // 합쳐진 파일 경로
-    //     const mergedFileName = `merged_${Date.now()}.mp4`;
-    //     const mergedFilePath = path.join(TEMP_SPLIT_DIR, mergedFileName);
-        
-    //     // ffmpeg로 합치기
-    //     execSync(
-    //       `ffmpeg -f concat -safe 0 -i "${fileListPath}" -c copy "${mergedFilePath}"`,
-    //       { encoding: 'utf8' }
-    //     );
-        
-    //     console.log(`✅ Videos merged successfully: ${mergedFilePath}`);
-        
-    //     // 합쳐진 파일 전송
-    //     const mergedFile = {
-    //       path: mergedFilePath,
-    //       realPath: mergedFilePath,
-    //       name: mergedFileName,
-    //       size: fs.statSync(mergedFilePath).size,
-    //       mtime: new Date(),
-    //       folder: 'Merged'
-    //     };
-        
-    //     const success = await sendToDiscord(mergedFile);
-    //     if (success) {
-    //       uploadedCount++;
-          
-    //       // 합쳐진 파일과 파일 목록 정리
-    //       fs.unlinkSync(mergedFilePath);
-    //       fs.unlinkSync(fileListPath);
-    //     }
-        
-    //     console.log('✅ Merged video uploaded and cleaned up');
-        
-    //     // 개별 파일은 건너뛰기
-    //     continue;
-        
-    //   } catch (error) {
-    //     console.error('❌ Error merging videos:', error.message);
-    //     // 에러 발생 시 개별 파일 전송 진행
-    //   }
-    // }
+    console.log('\n📊 Folder Map Information:');
+    console.log(`Total folders: ${folderMap.size}`);
 
-    const outputFileName = await runGrid2x2 (filesToSend)
+
+    lastSentDate = newLastSentDate
+
+    // folderMap에서 파일 리스트 추출
+
+    
+
+    return
+
+
+
+    
 
     console.log(`📤 Uploading merged grid video: ${outputFileName}`);
 
@@ -527,7 +517,9 @@ async function processFiles() {
     // }
     
   } catch (error) {
+    
     console.error('❌ Process error:', error.message);
+    await sendMessageToDiscord(`Process error : ${error.message}`);
   }
 }
 
@@ -540,13 +532,13 @@ console.log(`📂 Watching folders:`);
 WATCH_FOLDERS.forEach(folder => console.log(`   - ${folder}`));
 console.log('========================================\n');
 
-// 즉시 한 번 실행
-processFiles().catch(err => console.error('Initial run error:', err));
+// // 즉시 한 번 실행
+// processFiles().catch(err => console.error('Initial run error:', err));
 
-// 주기적 실행
-const interval = setInterval(() => {
-  processFiles().catch(err => console.error('Periodic run error:', err));
-}, CHECK_INTERVAL);
+// // 주기적 실행
+// const interval = setInterval(() => {
+//   processFiles().catch(err => console.error('Periodic run error:', err));
+// }, CHECK_INTERVAL);
 
 // 프로세스 종료 시 정리
 process.on('SIGINT', () => {
@@ -560,3 +552,18 @@ process.on('SIGTERM', () => {
   clearInterval(interval);
   process.exit(0);
 });
+
+
+async function startScheduler() {
+  while (true) {
+    const start = Date.now();
+    await processFiles(); // 업데이트 로직이 끝날 때까지 기다림
+    const elapsed = Date.now() - start;
+
+    // 최소 1분 간격 유지
+    const wait = Math.max(0, 60 * 1000 - elapsed);
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+}
+
+startScheduler();
