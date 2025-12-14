@@ -472,12 +472,19 @@ async function processFiles() {
 
           if (file.name.includes('-front')) {
 
+            const stats = fs.statSync(file.path);
+            const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+            await sendMessageToDiscord(`🚗 Tesla front file size: ${fileSizeMB} MB`);
+
             await runFFmepgByTime(file.path, '0', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 0~15:', outputFileName);
+
             await runFFmepgByTime(file.path, '15', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 15~30:', outputFileName);
+            
             await runFFmepgByTime(file.path, '30', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 30~45:', outputFileName);
+            
             await runFFmepgByTime(file.path, '45', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 45~60:', outputFileName);
           }
