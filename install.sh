@@ -175,7 +175,10 @@ if [ "$REGISTER_SERVICE" = "y" ] || [ "$REGISTER_SERVICE" = "Y" ]; then
     echo "   Registering service (sudo privileges required)..."
     sudo cp "$SERVICE_FILE" /etc/systemd/system/
     sudo systemctl daemon-reload
+    sudo systemctl stop teslausb-uploader
     sudo systemctl enable teslausb-uploader
+    sudo systemctl start teslausb-uploader
+
     echo "✅ Service registered and enabled"
     echo ""
     echo "   Start the service with: sudo systemctl start teslausb-uploader"
