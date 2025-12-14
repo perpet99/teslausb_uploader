@@ -474,7 +474,7 @@ async function processFiles() {
 
             const stats = fs.statSync(file.path);
             const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-            await sendMessageToDiscord(`🚗 Tesla front file size: ${fileSizeMB} MB\n add timestamp tool : https://teslacamconverter.netlify.app/`);
+            await sendMessageToDiscord(`🚗 Tesla front file size: ${fileSizeMB} MB`);
 
             await runFFmepgByTime(file.path, '0', '15',outputFileName);
             await sendToDiscord('🚗 Tesla front file 0~15:', outputFileName);
@@ -486,7 +486,7 @@ async function processFiles() {
             await sendToDiscord('🚗 Tesla front file 30~45:', outputFileName);
             
             await runFFmepgByTime(file.path, '45', '15',outputFileName);
-            await sendToDiscord('🚗 Tesla front file 45~60:', outputFileName);
+            await sendToDiscord('add timestamp tool : https://teslacamconverter.netlify.app/\n 🚗 Tesla front file 45~60:', outputFileName);
           }
         }
         console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
