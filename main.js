@@ -283,7 +283,12 @@ async function runFFmepgByTime(fileName, start, duration,outputFileName) {
     outputFileName,
   ];
 
-  await runFFmpeg(args);
+  try {
+    await runFFmpeg(args);
+  } catch (error) {
+    console.error('❌ FFmpeg error:', error.message);
+    throw error;
+  }
 
 }
 
