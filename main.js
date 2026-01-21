@@ -420,9 +420,9 @@ async function processFiles() {
     // Wi-Fi 연결 알림 전송
     
     // 스냅샷 생성
-    await makeSnapshot();
-    // 5초 대기
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // await makeSnapshot();
+    // // 5초 대기
+    // await new Promise(resolve => setTimeout(resolve, 5000));
     // 마지막 전송 날짜 로드
     // const lastSentDate = getLastSentDate();
     // console.log(`📅 Last sent date: ${lastSentDate.toISOString()}`);
