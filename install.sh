@@ -43,16 +43,58 @@ EOF
 
 echo "✅ .env file created: ${ENV_FILE}"
 
-# Check Node.js version
+# Check and install Node.js
 echo ""
 echo "🔍 Checking Node.js version..."
+REQUIRED_NODE_VERSION=22
+
 if command -v node > /dev/null 2>&1; then
     NODE_VERSION=$(node -v)
+    NODE_MAJOR_VERSION=$(echo "$NODE_VERSION" | sed 's/v\([0-9]*\).*/\1/')
     echo "✅ Node.js installed: ${NODE_VERSION}"
+
+    if [ "$NODE_MAJOR_VERSION" -lt "$REQUIRED_NODE_VERSION" ]; then
+        echo "⚠️ Node.js version is too old. Minimum required: v${REQUIRED_NODE_VERSION}"
+        echo "   Upgrading Node.js..."
+        INSTALL_NODE=true
+    else
+        INSTALL_NODE=false
+    fi
 else
-    echo "❌ Node.js is not installed."
-    echo "   Please install Node.js first: https://nodejs.org/"
-    exit 1
+    echo "⚠️ Node.js is not installed."
+    INSTALL_NODE=true
+fi
+
+if [ "$INSTALL_NODE" = true ]; then
+    echo "📦 Installing Node.js v${REQUIRED_NODE_VERSION}.x for Raspberry Pi..."
+
+    if command -v apt-get > /dev/null 2>&1; then
+        # Install prerequisites
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates curl gnupg
+
+        # Add NodeSource repository
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${REQUIRED_NODE_VERSION}.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+
+        # Install Node.js
+        sudo apt-get update
+        sudo apt-get install -y nodejs
+
+        if command -v node > /dev/null 2>&1; then
+            NODE_VERSION=$(node -v)
+            echo "✅ Node.js installation complete: ${NODE_VERSION}"
+        else
+            echo "❌ Node.js installation failed."
+            exit 1
+        fi
+    else
+        echo "❌ apt-get not found. Please install Node.js manually."
+        echo "   Visit: https://nodejs.org/"
+        exit 1
+    fi
 fi
 
 # Check npm version
