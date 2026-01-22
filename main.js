@@ -443,8 +443,6 @@ async function processFiles() {
       console.log(`\n📁 Folder: ${folderKey}`);
       console.log(`   Files count: ${files.length}`);
 
-      if( lastSentDate){
-        // const outputFileName = folderKey+'.mp4';
         const outputFileName = '/mutable/output.mp4';
         
         await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
@@ -464,14 +462,16 @@ async function processFiles() {
         await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB\n⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
         await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
-      }
 
       files.forEach(async (file, index) => {
-        if (file.mtime > newLastSentDate) {
+
+        if( newLastSentDate == null){
           newLastSentDate = file.mtime;
         }
 
-        if( lastSentDate){
+        if (file.mtime > newLastSentDate) {
+          newLastSentDate = file.mtime;
+        }
 
           const outputFileName = '/mutable/output.mp4';
 
@@ -493,7 +493,7 @@ async function processFiles() {
             await runFFmepgByTime(file.path, '45', '15',outputFileName);
             await sendToDiscord('add timestamp tool : https://teslacamconverter.netlify.app/\n 🚗 Tesla front file 45~60:', outputFileName);
           }
-        }
+
         console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
       });
     }
@@ -586,5 +586,30 @@ async function startScheduler() {
     await new Promise(resolve => setTimeout(resolve, wait));
   }
 }
+
+const folderMap = new Map();
+
+for (const folder of WATCH_FOLDERS) {
+  getAllMp4FilesByFolder(folder,folderMap);
+}
+
+
+// lastSentDate 초기설정
+for (const [folderKey, files] of folderMap.entries()) {
+  console.log(`\n📁 Folder: ${folderKey}`);
+  console.log(`   Files count: ${files.length}`);
+
+
+  files.forEach(async (file, index) => {
+    if( lastSentDate == null){
+      lastSentDate = file.mtime
+    }
+
+    if (file.mtime > lastSentDate) {
+      lastSentDate = file.mtime
+    }
+  });
+}
+    
 
 startScheduler();
