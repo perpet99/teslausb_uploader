@@ -46,19 +46,27 @@ echo "✅ .env file created: ${ENV_FILE}"
 # Check and install Node.js
 echo ""
 echo "🔍 Checking Node.js version..."
-REQUIRED_NODE_VERSION=22
+REQUIRED_NODE_VERSION=18
+NODE_FULL_VERSION="18.20.5"
 
 if command -v node > /dev/null 2>&1; then
     NODE_VERSION=$(node -v)
     NODE_MAJOR_VERSION=$(echo "$NODE_VERSION" | sed 's/v\([0-9]*\).*/\1/')
     echo "✅ Node.js installed: ${NODE_VERSION}"
 
-    if [ "$NODE_MAJOR_VERSION" -lt "$REQUIRED_NODE_VERSION" ]; then
-        echo "⚠️ Node.js version is too old. Minimum required: v${REQUIRED_NODE_VERSION}"
-        echo "   Upgrading Node.js..."
-        INSTALL_NODE=true
+    # Test if node actually works (GLIBC compatibility check)
+    if node -e "console.log('ok')" > /dev/null 2>&1; then
+        if [ "$NODE_MAJOR_VERSION" -lt "$REQUIRED_NODE_VERSION" ]; then
+            echo "⚠️ Node.js version is too old. Minimum required: v${REQUIRED_NODE_VERSION}"
+            echo "   Upgrading Node.js..."
+            INSTALL_NODE=true
+        else
+            INSTALL_NODE=false
+        fi
     else
-        INSTALL_NODE=false
+        echo "⚠️ Node.js is installed but not working (GLIBC compatibility issue)."
+        echo "   Reinstalling with compatible version..."
+        INSTALL_NODE=true
     fi
 else
     echo "⚠️ Node.js is not installed."
@@ -66,35 +74,74 @@ else
 fi
 
 if [ "$INSTALL_NODE" = true ]; then
-    echo "📦 Installing Node.js v${REQUIRED_NODE_VERSION}.x for Raspberry Pi..."
+    echo "📦 Installing Node.js v${NODE_FULL_VERSION} for Raspberry Pi..."
 
-    if command -v apt-get > /dev/null 2>&1; then
-        # Install prerequisites
-        sudo apt-get update
-        sudo apt-get install -y ca-certificates curl gnupg
+    # Detect architecture
+    ARCH=$(uname -m)
+    echo "   Detected architecture: ${ARCH}"
 
-        # Add NodeSource repository
-        sudo mkdir -p /etc/apt/keyrings
-        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-
-        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${REQUIRED_NODE_VERSION}.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
-
-        # Install Node.js
-        sudo apt-get update
-        sudo apt-get install -y nodejs
-
-        if command -v node > /dev/null 2>&1; then
-            NODE_VERSION=$(node -v)
-            echo "✅ Node.js installation complete: ${NODE_VERSION}"
-        else
-            echo "❌ Node.js installation failed."
+    case "$ARCH" in
+        armv6l)
+            # Raspberry Pi Zero, Pi 1
+            NODE_ARCH="armv6l"
+            USE_UNOFFICIAL=true
+            ;;
+        armv7l)
+            # Raspberry Pi 2, 3, 4 (32-bit OS)
+            NODE_ARCH="armv7l"
+            USE_UNOFFICIAL=false
+            ;;
+        aarch64)
+            # Raspberry Pi 3, 4, 5 (64-bit OS)
+            NODE_ARCH="arm64"
+            USE_UNOFFICIAL=false
+            ;;
+        *)
+            echo "❌ Unsupported architecture: ${ARCH}"
             exit 1
-        fi
+            ;;
+    esac
+
+    # Remove existing broken Node.js installation
+    if command -v apt-get > /dev/null 2>&1; then
+        echo "   Removing existing Node.js installation..."
+        sudo apt-get remove -y nodejs npm 2>/dev/null || true
+        sudo rm -rf /usr/local/lib/node* /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
+    fi
+
+    # Download and install Node.js
+    cd /tmp
+
+    if [ "$USE_UNOFFICIAL" = true ]; then
+        # Use unofficial-builds for armv6l (Pi Zero, Pi 1)
+        NODE_URL="https://unofficial-builds.nodejs.org/download/release/v${NODE_FULL_VERSION}/node-v${NODE_FULL_VERSION}-linux-${NODE_ARCH}.tar.gz"
     else
-        echo "❌ apt-get not found. Please install Node.js manually."
-        echo "   Visit: https://nodejs.org/"
+        # Use official builds for armv7l and arm64
+        NODE_URL="https://nodejs.org/dist/v${NODE_FULL_VERSION}/node-v${NODE_FULL_VERSION}-linux-${NODE_ARCH}.tar.gz"
+    fi
+
+    echo "   Downloading from: ${NODE_URL}"
+    curl -fsSL -o node.tar.gz "$NODE_URL"
+
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to download Node.js"
         exit 1
     fi
+
+    echo "   Extracting..."
+    sudo tar -xzf node.tar.gz -C /usr/local --strip-components=1
+    rm node.tar.gz
+
+    # Verify installation
+    if command -v node > /dev/null 2>&1 && node -e "console.log('ok')" > /dev/null 2>&1; then
+        NODE_VERSION=$(node -v)
+        echo "✅ Node.js installation complete: ${NODE_VERSION}"
+    else
+        echo "❌ Node.js installation failed."
+        exit 1
+    fi
+
+    cd "${INSTALL_DIR}"
 fi
 
 # Check npm version
