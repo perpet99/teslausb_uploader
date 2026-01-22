@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Tesla 대시캠 영상을 Discord로 자동 업로드",
   "main": "main.js",
+  "type": "module",
   "scripts": {
     "start": "node main.js",
     "dev": "nodemon main.js"
