@@ -495,9 +495,10 @@ async function processFiles() {
       });
     }
 
-    console.log('\n📊 Folder Map Information:');
+    console.log('\n📊 Folder Map Information: ');
     console.log(`Total folders: ${folderMap.size}`);
-
+    
+    console.log(`\n🕒 newLastSentDate: ${newLastSentDate instanceof Date ? newLastSentDate.toISOString() : newLastSentDate}`);
 
     lastSentDate = newLastSentDate
 
