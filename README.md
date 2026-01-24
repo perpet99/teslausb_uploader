@@ -17,19 +17,25 @@ Automatically upload Tesla dashcam videos to Discord when connected to a specifi
 - npm
 - ffmpeg (for video processing)
 - Raspberry Pi Zero 2w
+- Discord Webhook URL 
+- For instructions on obtaining a Webhook URL, see: [Discord Official Guide](https://support.discord.com/hc/en-us/articles/228383668)
 
 ## Installation
 
 
-0. install teslausb on raspberry Pi Zero 2w  https://github.com/marcone/teslausb/releases
+0. install teslausb on raspberry Pi Zero 2w  https://github.com/marcone/teslausb/releases/download/v5.2/teslausb-20250203.zip
+> **Note:** You must install the latest version of teslausb (requires ffmpeg 5.x or higher).
 - Watch installation guide: [Tesla USB Setup Tutorial](https://www.youtube.com/watch?v=ETs6r1vKTO8)
 1. set "export INCREASE_ROOT_SIZE=2G" in teslausb_setup_variables.conf
-2. connect teslausb
-3. Make the installation script executable and run it:
+2. set "export SNAPSHOT_INTERVAL=60" in teslausb_setup_variables.conf
+3. connect teslausb
+4. Make the installation script executable and run it:
 
 ```bash
 sudo -i
 bin/remountfs_rw
+sudo apt update
+sudo apt install git -y
 git clone https://github.com/perpet99/teslausb_uploader.git
 cd teslausb_uploader
 chmod +x install.sh
@@ -91,7 +97,7 @@ sudo systemctl start teslausb-uploader
 sudo systemctl status teslausb-uploader
 
 sudo journalctl -u teslausb-uploader -f
-sudo journalctl -u teslausb-uploader -n 100
+sudo journalctl -u teslausb-uploader -n 10
 
 ```
 
