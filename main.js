@@ -442,60 +442,63 @@ async function processFiles() {
 
         const outputFileName = '/mutable/output.mp4';
         
-        // await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
+        await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
 
-        // const startTime = Date.now();
-        // await runGrid2x2 (files, outputFileName);
-        // const endTime = Date.now();
-        // const duration = ((endTime - startTime) / 1000).toFixed(0);
-        // const minutes = Math.floor(duration / 60);
-        // const seconds = (duration % 60).toFixed(0);
-        // console.log(`⏱️ Merging completed in ${minutes}min ${seconds}sec`);
+        const startTime = Date.now();
+        await runGrid2x2 (files, outputFileName);
+        const endTime = Date.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(0);
+        const minutes = Math.floor(duration / 60);
+        const seconds = (duration % 60).toFixed(0);
+        console.log(`⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
-        // const stats = fs.statSync(outputFileName);
-        // const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-        // console.log(`📊 Output file size: ${fileSizeMB} MB`);
+        const stats = fs.statSync(outputFileName);
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        console.log(`📊 Output file size: ${fileSizeMB} MB`);
 
-        // await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB\n⏱️ Merging completed in ${minutes}min ${seconds}sec`);
+        await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB\n⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
-        // await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
+        await sendToDiscord('🚗 Tesla clip grid video:', outputFileName);
 
 
       
       // 순차적으로 실행되도록 for...of + await 사용
-      for (let index = 0; index < files.length; index++) {
-        const file = files[index];
+      // for (let index = 0; index < files.length; index++) {
+      //   const file = files[index];
 
-        if (newLastSentDate == null) {
-          newLastSentDate = file.mtime;
-        }
+      //   if (newLastSentDate == null) {
+      //     newLastSentDate = file.mtime;
+      //   }
 
-        if (file.mtime > newLastSentDate) {
-          newLastSentDate = file.mtime;
-        }
+      //   if (file.mtime > newLastSentDate) {
+      //     newLastSentDate = file.mtime;
+      //   }
 
-        const outputFileName = '/mutable/output.mp4';
+      //   const outputFileName = '/mutable/output.mp4';
 
-        if (file.name.includes('-front') || file.name.includes('-back')) {
-          const stats = fs.statSync(file.path);
-          const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-          await sendMessageToDiscord(`🚗 Tesla ${file.name} size: ${fileSizeMB} MB`);
+      //   if (file.name.includes('-front') || file.name.includes('-back')) {
 
-          await runFFmepgByTime(file.path, '0', '15', outputFileName);
-          await sendToDiscord(`🚗 Tesla ${file.name} 0~15:`, outputFileName);
+      //     const stats = fs.statSync(file.path);
+      //     const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+      //     await sendMessageToDiscord(`🚗 Tesla ${file.name} size: ${fileSizeMB} MB`);
 
-          await runFFmepgByTime(file.path, '15', '15', outputFileName);
-          await sendToDiscord(`🚗 Tesla ${file.name} 15~30:`, outputFileName);
+      //     await runFFmepgByTime(file.path, '0', '15', outputFileName);
+      //     await sendToDiscord(`🚗 Tesla ${file.name} 0~15:`, outputFileName);
 
-          await runFFmepgByTime(file.path, '30', '15', outputFileName);
-          await sendToDiscord(`🚗 Tesla ${file.name} 30~45:`, outputFileName);
+      //     await runFFmepgByTime(file.path, '15', '15', outputFileName);
+      //     await sendToDiscord(`🚗 Tesla ${file.name} 15~30:`, outputFileName);
 
-          await runFFmepgByTime(file.path, '45', '15', outputFileName);
-          await sendToDiscord(`add timestamp tool : https://teslacamconverter.netlify.app/\n 🚗 Tesla ${file.name} 45~60:`, outputFileName);
-        }
+      //     await runFFmepgByTime(file.path, '30', '15', outputFileName);
+      //     await sendToDiscord(`🚗 Tesla ${file.name} 30~45:`, outputFileName);
 
-        console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
-      }
+      //     await runFFmepgByTime(file.path, '45', '15', outputFileName);
+      //     await sendToDiscord(`add timestamp tool : https://teslacamconverter.netlify.app/\n 🚗 Tesla ${file.name} 45~60:`, outputFileName);
+      //   }
+
+      //   console.log(`   ${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB, ${file.mtime.toISOString()})`);
+      // }
+
+
 
       // // 병렬 처리 (주의: 디스코드 업로드 제한에 걸릴 수 있음)
       // files.forEach(async (file, index) => {
