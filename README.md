@@ -1,5 +1,7 @@
 # teslausb_uploader
 
+**English** | [한국어](README_KOR.md)
+
 Automatically upload Tesla dashcam videos to Discord when connected to a specific WiFi network.
 
 ## Features
