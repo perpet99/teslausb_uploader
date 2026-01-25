@@ -19,10 +19,54 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Discord limit)
 const CHUNK_SIZE = 5 * 1024 * 1024; // 10MB - 분할 크기
 const MAX_FILES_PER_RUN = 4;
 const CHECK_INTERVAL = 60 * 1000; // 1분 (밀리초)
-const LAST_SENT_FILE = '/tmp/discord_uploader_last_sent.txt';
-const TEMP_SPLIT_DIR = '/tmp/video_split_chunks'; // 임시 분할 파일 저장 폴더
+const LAST_SENT_FILE = '/mutable/discord_uploader_last_sent.txt';
+const TEMP_SPLIT_DIR = '/mutable/video_split_chunks'; // 임시 분할 파일 저장 폴더
+const LOG_FILE = '/mutable/teslausb_uploader.log'; // 로그 파일 경로
+const MAX_LOG_SIZE = 1 * 1024 * 1024; // 최대 로그 파일 크기 (1MB)
 let lastSentDate = null;
 let oldWifiConnected = false;
+
+// 로그 함수 - 콘솔과 파일에 동시에 기록
+function log(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+
+  // 콘솔 출력
+  console.log(message);
+
+  // 파일에 기록
+  try {
+    // 로그 파일 크기 확인 및 로테이션
+    if (fs.existsSync(LOG_FILE)) {
+      const stats = fs.statSync(LOG_FILE);
+      if (stats.size > MAX_LOG_SIZE) {
+        // 기존 로그 백업
+        const backupFile = LOG_FILE + '.old';
+        if (fs.existsSync(backupFile)) {
+          fs.unlinkSync(backupFile);
+        }
+        fs.renameSync(LOG_FILE, backupFile);
+      }
+    }
+    fs.appendFileSync(LOG_FILE, logMessage + '\n', 'utf8');
+  } catch (error) {
+    console.error('로그 파일 기록 실패:', error.message);
+  }
+}
+
+// 에러 로그 함수
+function logError(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ❌ ERROR: ${message}`;
+
+  console.error(message);
+
+  try {
+    fs.appendFileSync(LOG_FILE, logMessage + '\n', 'utf8');
+  } catch (error) {
+    console.error('로그 파일 기록 실패:', error.message);
+  }
+}
 
 // 마지막 전송 날짜 로드
 function getLastSentDate() {
@@ -32,7 +76,7 @@ function getLastSentDate() {
       return content ? new Date(content) : new Date(0);
     }
   } catch (error) {
-    console.error('Failed to read last sent date:', error.message);
+    logError('Failed to read last sent date: ' + error.message);
   }
   return new Date(0); // 파일이 없으면 epoch 시작
 }
@@ -42,7 +86,7 @@ function saveLastSentDate(date) {
   try {
     fs.writeFileSync(LAST_SENT_FILE, date.toISOString(), 'utf8');
   } catch (error) {
-    console.error('Failed to save last sent date:', error.message);
+    logError('Failed to save last sent date: ' + error.message);
   }
 }
 
@@ -63,9 +107,9 @@ function isConnectedToTargetWifi() {
   const currentSSID = getCurrentWifiSSID();
   const connected = currentSSID === TARGET_WIFI_SSID;
   if (connected) {
-    console.log(`✅ Connected to target Wi-Fi: ${currentSSID}`);
+    log(`✅ Connected to target Wi-Fi: ${currentSSID}`);
   } else {
-    console.log(`❌ Not connected to target Wi-Fi. Current: ${currentSSID || 'None'}`);
+    log(`❌ Not connected to target Wi-Fi. Current: ${currentSSID || 'None'}`);
   }
   return connected;
 }
@@ -73,17 +117,17 @@ function isConnectedToTargetWifi() {
 // 스냅샷 생성
 function makeSnapshot() {
   return new Promise((resolve, reject) => {
-    console.log('📸 Creating snapshot...');
+    log('📸 Creating snapshot...');
     exec('/root/bin/make_snapshot.sh', (error, stdout, stderr) => {
       if (error) {
-        console.error('Snapshot error:', error.message);
+        logError('Snapshot error: ' + error.message);
         reject(error);
         return;
       }
       if (stderr) {
-        console.log('Snapshot stderr:', stderr);
+        log('Snapshot stderr: ' + stderr);
       }
-      console.log('✅ Snapshot created');
+      log('✅ Snapshot created');
       resolve(stdout);
     });
   });
@@ -96,17 +140,17 @@ async function sendToDiscord(text = '', filePath = null) {
 
   try {
     const form = new FormData();
-    
+
     if (filePath != null) {
       const realPath = fs.realpathSync(filePath);
       const stats = fs.statSync(realPath);
       fileName = path.basename(filePath);
-      
-      console.log(`Processing: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
 
-      form.append('file', fs.createReadStream(realPath), fileName);  
+      log(`Processing: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
+      form.append('file', fs.createReadStream(realPath), fileName);
     }
-    
+
     if (text == '') {
       form.append('content', `🚗 Tesla clip: **${fileName}**`);
     } else {
@@ -119,9 +163,9 @@ async function sendToDiscord(text = '', filePath = null) {
       maxBodyLength: Infinity
     });
 
-    console.log(`✅ Successfully uploaded: ${fileName}`);
+    log(`✅ Successfully uploaded: ${fileName}`);
   } catch (error) {
-    console.error(`❌ Error uploading ${fileName}:`, error.message);
+    logError(`Error uploading ${fileName}: ${error.message}`);
   }
 }
 
@@ -131,7 +175,7 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
   // const folderMap = new Map();
   
   if (!fs.existsSync(rootPath)) {
-    console.log(`⚠️ Root path does not exist: ${rootPath}`);
+    log(`⚠️ Root path does not exist: ${rootPath}`);
     return folderMap;
   }
 
@@ -171,12 +215,12 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
               folder: path.basename(dir)
             });
           } catch (err) {
-            console.warn(`Skipping ${fullPath}: ${err.message}`);
+            log(`Skipping ${fullPath}: ${err.message}`);
           }
         }
       }
     } catch (err) {
-      console.warn(`Cannot read directory ${dir}: ${err.message}`);
+      log(`Cannot read directory ${dir}: ${err.message}`);
     }
   }
 
@@ -196,7 +240,7 @@ function getAllMp4Files(folderPath) {
   const files = [];
   
   if (!fs.existsSync(folderPath)) {
-    console.log(`⚠️ Folder does not exist: ${folderPath}`);
+    log(`⚠️ Folder does not exist: ${folderPath}`);
     return files;
   }
 
@@ -228,14 +272,14 @@ function getAllMp4Files(folderPath) {
               folder: path.basename(path.dirname(dir)) // SavedClips or SentryClips
             });
           } catch (err) {
-            console.warn(`Skipping ${fullPath}: ${err.message}`);
+            log(`Skipping ${fullPath}: ${err.message}`);
           }
         }else{
-          console.log(`Skipping non-mp4 file: ${fullPath}`);
+          log(`Skipping non-mp4 file: ${fullPath}`);
         }
       }
     } catch (err) {
-      console.warn(`Cannot read directory ${dir}: ${err.message}`);
+      log(`Cannot read directory ${dir}: ${err.message}`);
     }
   }
 
@@ -250,10 +294,10 @@ async function sendMessageToDiscord(message) {
         await axios.post(DISCORD_WEBHOOK_URL, {
             content: message
         });
-        console.log(`✅ Message sent to Discord: ${message}`);
+        log(`✅ Message sent to Discord: ${message}`);
         return true;
     } catch (error) {
-        console.error(`❌ Error sending message to Discord:`, error.message);
+        logError(`Error sending message to Discord: ${error.message}`);
         return false;
     }
 }
@@ -286,7 +330,7 @@ async function runFFmepgByTime(fileName, start, duration,outputFileName) {
   try {
     await runFFmpeg(args);
   } catch (error) {
-    console.error('❌ FFmpeg error:', error.message);
+    logError('FFmpeg error: ' + error.message);
     throw error;
   }
 
@@ -357,7 +401,7 @@ async function mergeVideos(files) {
   }
 
   try {
-    console.log('🎬 Merging 4 videos with ffmpeg...');
+    log('🎬 Merging 4 videos with ffmpeg...');
     
     // 임시 디렉토리 생성
     if (!fs.existsSync(TEMP_SPLIT_DIR)) {
@@ -383,35 +427,46 @@ async function mergeVideos(files) {
       { encoding: 'utf8' }
     );
     
-    console.log(`✅ Videos merged successfully: ${mergedFilePath}`);
-    
+    log(`✅ Videos merged successfully: ${mergedFilePath}`);
+
     // 파일 목록 정리
     fs.unlinkSync(fileListPath);
-    
+
     return mergedFilePath;
-    
+
   } catch (error) {
-    console.error('❌ Error merging videos:', error.message);
+    logError('Error merging videos: ' + error.message);
     throw error;
   }
 }
 
 // 메인 처리 함수
 async function processFiles() {
-  console.log('\n========================================');
-  console.log(`🔍 Starting check at ${new Date().toLocaleString()}`);
-  
+  log('\n========================================');
+  log(`🔍 Starting check at ${new Date().toLocaleString()}`);
+
   // Wi-Fi 확인
   if (!isConnectedToTargetWifi()) {
     oldWifiConnected = false;
-    console.log('⏸️ Skipping - not connected to target Wi-Fi');
+    log('⏸️ Skipping - not connected to target Wi-Fi');
     return;
   }
 
   try {
 
     if( oldWifiConnected === false ) {
-      await sendMessageToDiscord(`✅ Connected to Wi-Fi: ${TARGET_WIFI_SSID}`);
+
+      if( await sendMessageToDiscord(`✅ Connected to Wi-Fi: ${TARGET_WIFI_SSID}`) != true ){
+        log('❌ Failed to send Wi-Fi connected message');
+        return;
+      }
+
+      // WiFi 연결 성공 시 로그 파일 전송
+      if (fs.existsSync(LOG_FILE)) {
+        log('📄 Sending log file to Discord...');
+        await sendToDiscord('📋 시스템 로그 파일:', LOG_FILE);
+      }
+
       oldWifiConnected = true;
     }
     // Wi-Fi 연결 알림 전송
@@ -437,8 +492,8 @@ async function processFiles() {
     // folderMap 정보 출력
     let newLastSentDate = lastSentDate;
     for (const [folderKey, files] of folderMap.entries()) {
-      console.log(`\n📁 Folder: ${folderKey}`);
-      console.log(`   Files count: ${files.length}`);
+      log(`\n📁 Folder: ${folderKey}`);
+      log(`   Files count: ${files.length}`);
 
         const outputFileName = '/mutable/output.mp4';
         
@@ -450,11 +505,11 @@ async function processFiles() {
         const duration = ((endTime - startTime) / 1000).toFixed(0);
         const minutes = Math.floor(duration / 60);
         const seconds = (duration % 60).toFixed(0);
-        console.log(`⏱️ Merging completed in ${minutes}min ${seconds}sec`);
+        log(`⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
         const stats = fs.statSync(outputFileName);
         const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
-        console.log(`📊 Output file size: ${fileSizeMB} MB`);
+        log(`📊 Output file size: ${fileSizeMB} MB`);
 
         await sendMessageToDiscord(`🚗 End merging tesla clip from folder: file size: ${fileSizeMB} MB\n⏱️ Merging completed in ${minutes}min ${seconds}sec`);
 
@@ -536,10 +591,10 @@ async function processFiles() {
       // });
     }
 
-    console.log('\n📊 Folder Map Information: ');
-    console.log(`Total folders: ${folderMap.size}`);
-    
-    console.log(`\n🕒 newLastSentDate: ${newLastSentDate instanceof Date ? newLastSentDate.toISOString() : newLastSentDate}`);
+    log('\n📊 Folder Map Information: ');
+    log(`Total folders: ${folderMap.size}`);
+
+    log(`\n🕒 newLastSentDate: ${newLastSentDate instanceof Date ? newLastSentDate.toISOString() : newLastSentDate}`);
 
     lastSentDate = newLastSentDate
 
@@ -551,9 +606,9 @@ async function processFiles() {
 
 
 
-    
 
-    console.log(`📤 Uploading merged grid video: ${outputFileName}`);
+
+    log(`📤 Uploading merged grid video: ${outputFileName}`);
 
     // for (const file of filesToSend) {
 
@@ -577,20 +632,20 @@ async function processFiles() {
     // }
     
   } catch (error) {
-    
-    console.error('❌ Process error:', error.message);
+
+    logError('Process error: ' + error.message);
     await sendMessageToDiscord(`Process error : ${error.message}`);
   }
 }
 
 // 주기적 실행
-console.log('🚀 Tesla USB Discord Uploader Started');
-console.log(`📡 Discord webhook: ${DISCORD_WEBHOOK_URL ? 'Configured' : 'NOT CONFIGURED'}`);
-console.log(`📶 Target Wi-Fi: ${TARGET_WIFI_SSID}`);
-console.log(`⏱️ Check interval: ${CHECK_INTERVAL / 1000} seconds`);
-console.log(`📂 Watching folders:`);
-WATCH_FOLDERS.forEach(folder => console.log(`   - ${folder}`));
-console.log('========================================\n');
+log('🚀 Tesla USB Discord Uploader Started');
+log(`📡 Discord webhook: ${DISCORD_WEBHOOK_URL ? 'Configured' : 'NOT CONFIGURED'}`);
+log(`📶 Target Wi-Fi: ${TARGET_WIFI_SSID}`);
+log(`⏱️ Check interval: ${CHECK_INTERVAL / 1000} seconds`);
+log(`📂 Watching folders:`);
+WATCH_FOLDERS.forEach(folder => log(`   - ${folder}`));
+log('========================================\n');
 
 // // 즉시 한 번 실행
 // processFiles().catch(err => console.error('Initial run error:', err));
@@ -602,13 +657,13 @@ console.log('========================================\n');
 
 // 프로세스 종료 시 정리
 process.on('SIGINT', () => {
-  console.log('\n👋 Shutting down...');
+  log('\n👋 Shutting down...');
   clearInterval(interval);
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n👋 Shutting down...');
+  log('\n👋 Shutting down...');
   clearInterval(interval);
   process.exit(0);
 });
@@ -635,8 +690,8 @@ for (const folder of WATCH_FOLDERS) {
 
 // lastSentDate 초기설정
 for (const [folderKey, files] of folderMap.entries()) {
-  console.log(`\n📁 Folder: ${folderKey}`);
-  console.log(`   Files count: ${files.length}`);
+  log(`\n📁 Folder: ${folderKey}`);
+  log(`   Files count: ${files.length}`);
 
 
   files.forEach(async (file, index) => {
