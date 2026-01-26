@@ -228,7 +228,7 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
   
   // 각 폴더별로 최신 4개만 유지
   for (const [folder, files] of folderMap.entries()) {
-    files.sort((a, b) => a.mtime - b.mtime); // 오래된 순서로 정렬
+    files.sort((a, b) => b.mtime - a.mtime ); // 최신순 정렬
     folderMap.set(folder, files.slice(0, 4));
   }
   
