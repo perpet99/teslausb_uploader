@@ -342,7 +342,7 @@ async function runGrid2x2(files, outputFileName) {
     return null
   }
 
-
+  await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**\n ${files[0].path} : ${files[1].path}\n ${files[2].path} : ${files[3].path}`);
   
 
   const args = [
@@ -500,7 +500,7 @@ async function processFiles() {
 
         const outputFileName = '/mutable/output.mp4';
         
-        await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**\n ${files}`);
+        
 
         const startTime = Date.now();
         await runGrid2x2 (files, outputFileName);
