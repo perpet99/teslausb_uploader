@@ -169,6 +169,16 @@ async function sendToDiscord(text = '', filePath = null) {
   }
 }
 
+nameToDate = (fileName) => {
+  // 예: TeslaCam_2023-10-01_12-30-45-front.mp4
+  const regex = /(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/;
+  const match = fileName.match(regex);  
+  if (match) {
+    const [_, year, month, day, hour, minute, second] = match;
+    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+  } 
+  return new Date(0); // 기본값
+}
 
 // 폴더별 최신 파일 4개씩 수집
 function getAllMp4FilesByFolder(rootPath,folderMap) {
@@ -194,8 +204,8 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
             
             const realPath = fs.realpathSync(fullPath);
             const stats = fs.statSync(realPath);
-            
-            if( lastSentDate != null && stats.mtime <= lastSentDate ) {
+            const fildDate = nameToDate(entry.name);
+            if( lastSentDate != null && fildDate <= lastSentDate ) {
               // console.log(`Skipping old file: ${fullPath}`);
               continue;
             }
@@ -211,7 +221,7 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
               realPath: realPath,
               name: entry.name,
               size: stats.size,
-              mtime: stats.mtime,
+              mtime: fildDate,
               folder: path.basename(dir)
             });
           } catch (err) {
