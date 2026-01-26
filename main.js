@@ -336,7 +336,7 @@ async function runFFmepgByTime(fileName, start, duration,outputFileName) {
 
 }
 
-async function runGrid2x2(files, outputFileName) {
+async function runGrid2x2(files, outputFileName, folderKey) {
   if (files.length !== 4) {
     // throw new Error(`Expected 4 files, but got ${files.length}`);
     return null
@@ -503,7 +503,7 @@ async function processFiles() {
         
 
         const startTime = Date.now();
-        await runGrid2x2 (files, outputFileName);
+        await runGrid2x2 (files, outputFileName,folderKey);
         const endTime = Date.now();
         const duration = ((endTime - startTime) / 1000).toFixed(0);
         const minutes = Math.floor(duration / 60);
