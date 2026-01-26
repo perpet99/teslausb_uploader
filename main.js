@@ -195,7 +195,7 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
             const realPath = fs.realpathSync(fullPath);
             const stats = fs.statSync(realPath);
             
-            if( lastSentDate && stats.mtime <= lastSentDate ) {
+            if( lastSentDate != null && stats.mtime <= lastSentDate ) {
               // console.log(`Skipping old file: ${fullPath}`);
               continue;
             }
@@ -228,7 +228,7 @@ function getAllMp4FilesByFolder(rootPath,folderMap) {
   
   // 각 폴더별로 최신 4개만 유지
   for (const [folder, files] of folderMap.entries()) {
-    files.sort((a, b) => b.mtime - a.mtime);
+    files.sort((a, b) => a.mtime - b.mtime); // 오래된 순서로 정렬
     folderMap.set(folder, files.slice(0, 4));
   }
   
@@ -341,6 +341,9 @@ async function runGrid2x2(files, outputFileName) {
     // throw new Error(`Expected 4 files, but got ${files.length}`);
     return null
   }
+
+
+  
 
   const args = [
     '-y',
@@ -497,7 +500,7 @@ async function processFiles() {
 
         const outputFileName = '/mutable/output.mp4';
         
-        await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**`);
+        await sendMessageToDiscord(`🚗 Start merging tesla clip from folder: **${folderKey}**\n ${files}`);
 
         const startTime = Date.now();
         await runGrid2x2 (files, outputFileName);
