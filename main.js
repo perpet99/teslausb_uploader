@@ -169,7 +169,7 @@ async function sendToDiscord(text = '', filePath = null) {
   }
 }
 
-nameToDate = (fileName) => {
+function nameToDate(fileName) {
   // 예: TeslaCam_2023-10-01_12-30-45-front.mp4
   const regex = /(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/;
   const match = fileName.match(regex);  
